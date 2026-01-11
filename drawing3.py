@@ -2,9 +2,9 @@ import cv2
 import numpy as np
 from quickdraw import QuickDrawData
 from skimage.metrics import structural_similarity as ssim
-import time
-import random
 import os
+from keras.models import load_model
+from PIL import Image
 
 # --- Simple words for drawing game ---
 SIMPLE_WORDS = [
@@ -15,9 +15,8 @@ SIMPLE_WORDS = [
     "book", "clock", "key", "umbrella", "rainbow", "butterfly"
 ]
 
-def get_random_word():
-    """Get a random simple word from the list."""
-    return random.choice(SIMPLE_WORDS)
+# Path to QuickDraw model
+MODEL_PATH = "QuickDraw.h5"  # Change this to your model path
 
 def get_quickdraw_reference(category):
     """Get a reference drawing from QuickDraw dataset."""
@@ -64,234 +63,153 @@ def normalize_drawing(img):
     normalized = cv2.resize(square, (28, 28), interpolation=cv2.INTER_AREA)
     return normalized
 
-def extract_black_drawing_only(img):
-    """Extract only black lines/drawings, removing background completely."""
-    # Convert to grayscale
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+def preprocess_image_for_model(img):
+    """Preprocess image for QuickDraw model prediction."""
+    # Convert to grayscale if needed
+    if len(img.shape) == 3:
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = img
     
-    # Method 1: Adaptive thresholding to handle varying lighting
-    adaptive_thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                            cv2.THRESH_BINARY_INV, 11, 2)
-    
-    # Method 2: Simple thresholding for dark lines
-    _, simple_thresh = cv2.threshold(gray, 100, 255, cv2.THRESH_BINARY_INV)
-    
-    # Method 3: Use Canny edge detection to find edges
-    edges = cv2.Canny(gray, 50, 150)
-    
-    # Combine methods - focus on black/dark regions
-    # Use the threshold that captures black lines best
-    combined = cv2.bitwise_or(adaptive_thresh, simple_thresh)
-    combined = cv2.bitwise_or(combined, edges)
-    
-    # Morphological operations to clean up
-    kernel = np.ones((2, 2), np.uint8)
-    combined = cv2.morphologyEx(combined, cv2.MORPH_CLOSE, kernel)
-    combined = cv2.morphologyEx(combined, cv2.MORPH_OPEN, kernel)
-    
-    # Find contours and filter to keep only significant black regions
-    contours, _ = cv2.findContours(combined, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    # Create a mask for valid contours (black lines)
-    mask = np.zeros_like(gray)
-    
-    # Filter contours - keep only those that represent lines/drawings
-    min_area = 50  # Minimum area for a valid drawing line
-    max_area = gray.shape[0] * gray.shape[1] * 0.8  # Don't take entire image
-    
-    for contour in contours:
-        area = cv2.contourArea(contour)
-        if min_area < area < max_area:
-            # Check if it's likely a line (aspect ratio or circularity)
-            x, y, w, h = cv2.boundingRect(contour)
-            aspect_ratio = max(w, h) / max(min(w, h), 1)
-            
-            # Keep thin lines (high aspect ratio) or small compact shapes
-            if aspect_ratio > 2.0 or area < 5000:
-                cv2.drawContours(mask, [contour], -1, 255, -1)
-    
-    # If mask is mostly empty, use the combined threshold directly
-    if np.sum(mask > 0) < 100:
-        mask = combined
-    
-    # Final cleanup - remove small noise
-    kernel_clean = np.ones((3, 3), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel_clean)
-    
-    return mask
-
-def preprocess_captured_image(img):
-    """Preprocess captured image - focus only on black drawings."""
-    # Extract black drawing only
-    black_drawing = extract_black_drawing_only(img)
+    # Apply threshold to get binary image
+    _, thresh = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY_INV)
     
     # Normalize the drawing
-    normalized = normalize_drawing(black_drawing)
+    normalized = normalize_drawing(thresh)
     
-    return normalized, img, black_drawing
+    # Resize to 28x28 (standard QuickDraw model input size)
+    processed = cv2.resize(normalized, (28, 28), interpolation=cv2.INTER_AREA)
+    
+    # Convert to float32 and normalize to 0-1 range
+    processed = processed.astype(np.float32) / 255.0
+    
+    # Reshape for model input: (1, 28, 28, 1)
+    processed = np.reshape(processed, (1, 28, 28, 1))
+    
+    return processed, normalized
 
-def capture_photo_from_camera(category):
-    """Capture a photo from webcam."""
-    cap = cv2.VideoCapture(0)
-    
-    if not cap.isOpened():
-        raise RuntimeError("Error: Could not open webcam")
-    
-    print("\n" + "=" * 60)
-    print("📸 Camera Capture Mode")
-    print("=" * 60)
-    print(f"\nCategory: {category.upper()}")
-    print("\nInstructions:")
-    print("  • Draw with BLACK pen/marker on WHITE paper")
-    print("  • Position your drawing in front of the camera")
-    print("  • Make sure the drawing is clearly visible")
-    print("  • Press SPACEBAR or 'c' to CAPTURE the photo")
-    print("  • Press 'q' to QUIT without capturing")
-    print("\nReady to capture...")
-    
-    captured_image = None
-    
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            print("Error: Could not read from camera")
-            break
-        
-        # Flip frame horizontally for mirror effect
-        frame = cv2.flip(frame, 1)
-        
-        # Add instructions overlay
-        h, w = frame.shape[:2]
-        overlay = frame.copy()
-        cv2.rectangle(overlay, (10, 10), (w - 10, 160), (0, 0, 0), -1)
-        cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
-        
-        cv2.putText(frame, f"Draw: {category.upper()}", 
-                   (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-        cv2.putText(frame, "Use BLACK pen on WHITE paper", 
-                   (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-        cv2.putText(frame, "Position drawing and press SPACEBAR to CAPTURE", 
-                   (20, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-        cv2.putText(frame, "Press 'q' to quit", 
-                   (20, 130), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        cv2.putText(frame, "Press 'c' or SPACEBAR to capture", 
-                   (20, 160), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        
-        # Draw a border to guide positioning
-        border_thickness = 3
-        cv2.rectangle(frame, (50, 50), (w - 50, h - 50), (0, 255, 0), border_thickness)
-        cv2.putText(frame, "Position drawing here", (w//2 - 100, 40), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-        
-        cv2.imshow(f"Camera - Draw: {category.upper()} - Press SPACEBAR to Capture", frame)
-        
-        key = cv2.waitKey(1) & 0xFF
-        
-        if key == ord(' ') or key == ord('c'):  # Spacebar or 'c' to capture
-            captured_image = frame.copy()
-            print("\n✅ Photo captured!")
-            
-            # Show captured image briefly
-            cv2.putText(captured_image, "CAPTURED! Processing...", 
-                       (w//2 - 150, h//2), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 3)
-            cv2.imshow(f"Camera - Draw: {category.upper()} - Press SPACEBAR to Capture", captured_image)
-            cv2.waitKey(1000)  # Show for 1 second
-            break
-        
-        elif key == ord('q'):
-            print("\n❌ Capture cancelled")
-            cap.release()
-            cv2.destroyAllWindows()
-            return None
-    
-    cap.release()
-    cv2.destroyAllWindows()
-    
-    return captured_image
+def keras_predict(model, image):
+    """Predict using the QuickDraw model."""
+    pred_probab = model.predict(image, verbose=0)[0]
+    pred_class_idx = np.argmax(pred_probab)
+    confidence = pred_probab[pred_class_idx]
+    return confidence, pred_class_idx, pred_probab
 
-def get_contour_statistics(img):
-    """Get detailed contour statistics from an image."""
-    contours, hierarchy = cv2.findContours(img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    min_contour_area = 5
-    filtered_contours = [c for c in contours if cv2.contourArea(c) >= min_contour_area]
+def load_quickdraw_model(model_path):
+    """Load the QuickDraw model."""
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"Model file not found: {model_path}")
     
-    external_contours, _ = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    filtered_external = [c for c in external_contours if cv2.contourArea(c) >= min_contour_area]
-    
-    total_points = sum(len(c) for c in filtered_contours)
-    external_points = sum(len(c) for c in filtered_external)
-    total_area = sum(cv2.contourArea(c) for c in filtered_contours)
-    
-    return {
-        'all_contours': filtered_contours,
-        'external_contours': filtered_external,
-        'total_contours': len(filtered_contours),
-        'external_contour_count': len(filtered_external),
-        'total_points': total_points,
-        'external_points': external_points,
-        'total_area': total_area,
-        'hierarchy': hierarchy
-    }
+    print(f"📦 Loading model from {model_path}...")
+    model = load_model(model_path)
+    print("✅ Model loaded successfully")
+    return model
 
-def compare_contours_detailed(user_img, ref_img):
-    """Compare contours between two images with detailed statistics."""
-    user_stats = get_contour_statistics(user_img)
-    ref_stats = get_contour_statistics(ref_img)
+def get_category_from_index(index, category_list):
+    """Get category name from model prediction index."""
+    # This mapping depends on how your model was trained
+    # You may need to adjust this based on your model's class order
+    if index < len(category_list):
+        return category_list[index]
+    return "unknown"
+
+def create_comparison_display(user_img, ref_img, original_img, category, predicted_category, 
+                              confidence, model_confidence, score_details):
+    """Create a unified display showing comparison results."""
+    display_h, display_w = 800, 1200
+    unified = np.ones((display_h, display_w, 3), dtype=np.uint8) * 240
     
-    user_contours = user_stats['external_contours']
-    ref_contours = ref_stats['external_contours']
+    # Resize components
+    img_w, img_h = 300, 300
+    orig_w, orig_h = 300, 300
     
-    if len(user_contours) == 0 or len(ref_contours) == 0:
-        return {
-            'similarity': 0.0,
-            'matched_contours': 0,
-            'total_compared': 0,
-            'match_percentage': 0.0,
-            'user_total': len(user_contours),
-            'ref_total': len(ref_contours),
-            'user_stats': user_stats,
-            'ref_stats': ref_stats
-        }
+    # Original image
+    orig_resized = cv2.resize(original_img, (orig_w, orig_h))
+    unified[50:50+orig_h, 50:50+orig_w] = orig_resized
+    cv2.putText(unified, "Your Uploaded Image", (50, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
     
-    match_scores = []
-    matched_pairs = []
+    # User normalized image
+    user_colored = cv2.cvtColor(user_img, cv2.COLOR_GRAY2BGR)
+    user_resized = cv2.resize(user_colored, (img_w, img_h))
+    unified[50:50+img_h, 400:400+img_w] = user_resized
+    cv2.putText(unified, "Your Drawing (Normalized)", (400, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
     
-    for i, user_contour in enumerate(user_contours):
-        best_match_score = float('inf')
-        best_match_idx = -1
-        
-        for j, ref_contour in enumerate(ref_contours):
-            match_score = cv2.matchShapes(user_contour, ref_contour, cv2.CONTOURS_MATCH_I2, 0)
-            if match_score < best_match_score:
-                best_match_score = match_score
-                best_match_idx = j
-        
-        if best_match_idx != -1:
-            match_scores.append(best_match_score)
-            matched_pairs.append((i, best_match_idx, best_match_score))
+    # Reference image
+    ref_colored = cv2.cvtColor(ref_img, cv2.COLOR_GRAY2BGR)
+    ref_resized = cv2.resize(ref_colored, (img_w, img_h))
+    unified[50:50+img_h, 750:750+img_w] = ref_resized
+    cv2.putText(unified, f"QuickDraw: {category.upper()}", (750, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
     
-    if len(match_scores) > 0:
-        similarities = [1.0 / (1.0 + score) for score in match_scores]
-        avg_similarity = np.mean(similarities)
+    # Results panel
+    results_x = 50
+    results_y = 400
+    results_w = 1000
+    results_h = 350
+    
+    cv2.rectangle(unified, (results_x, results_y), (results_x + results_w, results_y + results_h), 
+                 (200, 200, 200), -1)
+    cv2.rectangle(unified, (results_x, results_y), (results_x + results_w, results_y + results_h), 
+                 (0, 0, 0), 2)
+    
+    y_pos = results_y + 40
+    line_height = 30
+    
+    # Title
+    cv2.putText(unified, "PREDICTION RESULTS", (results_x + 20, y_pos),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+    y_pos += line_height + 10
+    
+    # Model prediction
+    cv2.putText(unified, f"Model Predicted: {predicted_category.upper()}", 
+               (results_x + 20, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+    y_pos += line_height
+    
+    cv2.putText(unified, f"Model Confidence: {model_confidence:.2%}", 
+               (results_x + 20, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+    y_pos += line_height
+    
+    # Expected category
+    cv2.putText(unified, f"Expected Category: {category.upper()}", 
+               (results_x + 20, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
+    y_pos += line_height
+    
+    # Match result
+    if predicted_category.lower() == category.lower():
+        match_text = "✅ MATCH!"
+        match_color = (0, 255, 0)
     else:
-        avg_similarity = 0.0
+        match_text = "❌ NO MATCH"
+        match_color = (0, 0, 255)
     
-    good_matches = sum(1 for score in match_scores if 1.0 / (1.0 + score) > 0.5)
-    total_possible_matches = min(len(user_contours), len(ref_contours))
-    match_percentage = (good_matches / total_possible_matches * 100) if total_possible_matches > 0 else 0.0
+    cv2.putText(unified, match_text, (results_x + 20, y_pos),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.7, match_color, 2)
+    y_pos += line_height + 10
     
-    return {
-        'similarity': avg_similarity,
-        'matched_contours': good_matches,
-        'total_compared': len(matched_pairs),
-        'match_percentage': match_percentage,
-        'user_total': len(user_contours),
-        'ref_total': len(ref_contours),
-        'user_stats': user_stats,
-        'ref_stats': ref_stats,
-        'match_scores': match_scores,
-        'matched_pairs': matched_pairs
-    }
+    # Similarity scores
+    cv2.putText(unified, "Similarity Scores:", (results_x + 20, y_pos),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+    y_pos += line_height
+    
+    cv2.putText(unified, f"  SSIM: {score_details['ssim']:.2%}", 
+               (results_x + 20, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+    y_pos += line_height - 5
+    
+    cv2.putText(unified, f"  Contour: {score_details['contour']:.2%}", 
+               (results_x + 20, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+    y_pos += line_height - 5
+    
+    cv2.putText(unified, f"  Histogram: {score_details['histogram']:.2%}", 
+               (results_x + 20, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+    y_pos += line_height - 5
+    
+    cv2.putText(unified, f"  Combined: {confidence:.2%}", 
+               (results_x + 20, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+    
+    # Title
+    cv2.putText(unified, "QuickDraw Model Comparison", (50, 30),
+               cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+    
+    return unified
 
 def compare_drawings_ssim(user_img, ref_img):
     """Compare using Structural Similarity Index."""
@@ -334,114 +252,23 @@ def compare_drawings_combined(user_img, ref_img):
         'histogram': hist_score
     }
 
-def visualize_contours(img, stats, title="Contours"):
-    """Visualize contours on image."""
-    vis_img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-    cv2.drawContours(vis_img, stats['external_contours'], -1, (0, 255, 0), 1)
-    cv2.drawContours(vis_img, stats['all_contours'], -1, (255, 0, 0), 1)
-    return vis_img
-
-def create_comparison_display(user_img, ref_img, original_img, extracted_img, category, user_stats, ref_stats, 
-                              contour_comparison, overall_score, score_details):
-    """Create a unified display showing comparison results."""
-    display_h, display_w = 800, 1200
-    unified = np.ones((display_h, display_w, 3), dtype=np.uint8) * 240
-    
-    # Resize components
-    img_w, img_h = 250, 250
-    orig_w, orig_h = 250, 250
-    
-    # Original image
-    orig_resized = cv2.resize(original_img, (orig_w, orig_h))
-    unified[50:50+orig_h, 50:50+orig_w] = orig_resized
-    cv2.putText(unified, "Your Captured Image", (50, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
-    
-    # Extracted black drawing
-    extracted_colored = cv2.cvtColor(extracted_img, cv2.COLOR_GRAY2BGR)
-    extracted_resized = cv2.resize(extracted_colored, (img_w, img_h))
-    unified[50:50+img_h, 320:320+img_w] = extracted_resized
-    cv2.putText(unified, "Extracted Black Lines", (320, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
-    
-    # User normalized image
-    user_colored = cv2.cvtColor(user_img, cv2.COLOR_GRAY2BGR)
-    user_resized = cv2.resize(user_colored, (img_w, img_h))
-    unified[50:50+img_h, 590:590+img_w] = user_resized
-    cv2.putText(unified, "Normalized", (590, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
-    
-    # Reference image
-    ref_colored = cv2.cvtColor(ref_img, cv2.COLOR_GRAY2BGR)
-    ref_resized = cv2.resize(ref_colored, (img_w, img_h))
-    unified[50:50+img_h, 860:860+img_w] = ref_resized
-    cv2.putText(unified, f"QuickDraw: {category.upper()}", (860, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
-    
-    # Contour visualizations
-    user_vis = visualize_contours(user_img, user_stats)
-    ref_vis = visualize_contours(ref_img, ref_stats)
-    
-    user_vis_resized = cv2.resize(user_vis, (img_w, img_h))
-    ref_vis_resized = cv2.resize(ref_vis, (img_w, img_h))
-    
-    unified[330:330+img_h, 50:50+img_w] = user_vis_resized
-    cv2.putText(unified, "Your Contours", (50, 320), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
-    
-    unified[330:330+img_h, 320:320+img_w] = ref_vis_resized
-    cv2.putText(unified, "Reference Contours", (320, 320), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
-    
-    # Results panel
-    results_x = 590
-    results_y = 330
-    results_w = 520
-    results_h = 250
-    
-    cv2.rectangle(unified, (results_x, results_y), (results_x + results_w, results_y + results_h), 
-                 (200, 200, 200), -1)
-    cv2.rectangle(unified, (results_x, results_y), (results_x + results_w, results_y + results_h), 
-                 (0, 0, 0), 2)
-    
-    y_pos = results_y + 30
-    line_height = 22
-    
-    cv2.putText(unified, f"Category: {category.upper()}", (results_x + 10, y_pos),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
-    y_pos += line_height
-    
-    cv2.putText(unified, f"Overall Score: {overall_score:.2%}", (results_x + 10, y_pos),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-    y_pos += line_height
-    
-    cv2.putText(unified, f"SSIM: {score_details['ssim']:.2%}", (results_x + 10, y_pos),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
-    y_pos += line_height
-    
-    cv2.putText(unified, f"Contour: {score_details['contour']:.2%}", (results_x + 10, y_pos),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
-    y_pos += line_height
-    
-    cv2.putText(unified, f"Histogram: {score_details['histogram']:.2%}", (results_x + 10, y_pos),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
-    y_pos += line_height
-    
-    cv2.putText(unified, f"Contours Matched: {contour_comparison['matched_contours']}/{contour_comparison['total_compared']}",
-               (results_x + 10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
-    y_pos += line_height
-    
-    cv2.putText(unified, f"Match %: {contour_comparison['match_percentage']:.1f}%",
-               (results_x + 10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
-    
-    # Title
-    cv2.putText(unified, "Image Comparison - Black Lines Only", (50, 30),
-               cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-    
-    return unified
-
 # ============================================
 # MAIN EXECUTION
 # ============================================
 print("=" * 60)
-print("🎨 Image Comparison with QuickDraw Dataset")
+print("🎨 QuickDraw Model Comparison")
 print("=" * 60)
 
-# Step 1: Get category FIRST
+# Step 1: Load the model
+try:
+    model = load_quickdraw_model(MODEL_PATH)
+except Exception as e:
+    print(f"❌ Error loading model: {e}")
+    print(f"   Please make sure MODEL_PATH is set correctly at the top of the code")
+    print(f"   Current path: {MODEL_PATH}")
+    raise
+
+# Step 2: Get category
 print("\nAvailable categories:")
 for i, word in enumerate(SIMPLE_WORDS, 1):
     print(f"  {i:2d}. {word}")
@@ -463,86 +290,86 @@ except ValueError:
 print(f"\n🎨 Selected Category: {category.upper()}")
 print("=" * 60)
 
-# Step 2: Get reference drawing
+# Step 3: Get image path
+image_path = input("\nEnter the path to your image file: ").strip().strip('"')
+
+if not os.path.exists(image_path):
+    print(f"❌ Image file not found: {image_path}")
+    exit()
+
+# Step 4: Load and preprocess image
+try:
+    print(f"\n📂 Loading image: {image_path}")
+    original_img = cv2.imread(image_path)
+    if original_img is None:
+        raise ValueError(f"Could not read image from: {image_path}")
+    
+    print("📊 Preprocessing image for model...")
+    processed_img, normalized_img = preprocess_image_for_model(original_img)
+    print("✅ Image processed successfully")
+except Exception as e:
+    print(f"❌ Error processing image: {e}")
+    raise
+
+# Step 5: Get reference drawing
 try:
     print(f"🔍 Fetching QuickDraw reference for '{category}'...")
     drawing = get_quickdraw_reference(category)
     reference_img = render_drawing_to_image(drawing)
     reference_img = normalize_drawing(reference_img)
     print("✅ Reference drawing loaded successfully")
-    print(f"💡 You should draw: {category.upper()}")
 except Exception as e:
     print(f"❌ Error loading QuickDraw reference: {e}")
     raise
 
-# Step 3: Capture photo
-captured_image = capture_photo_from_camera(category)
+# Step 6: Model prediction
+print("\n🤖 Running model prediction...")
+model_confidence, pred_class_idx, all_predictions = keras_predict(model, processed_img)
+predicted_category = get_category_from_index(pred_class_idx, SIMPLE_WORDS)
 
-if captured_image is None:
-    print("\n❌ No image captured. Exiting...")
-    exit()
+print(f"   Model predicted: {predicted_category.upper()}")
+print(f"   Confidence: {model_confidence:.2%}")
 
-# Step 4: Preprocess captured image - EXTRACT BLACK LINES ONLY
-try:
-    print("\n📊 Processing captured image...")
-    print("   Extracting black lines only (ignoring background)...")
-    user_img, original_img, extracted_img = preprocess_captured_image(captured_image)
-    print("✅ Image processed successfully - only black outlines extracted")
-except Exception as e:
-    print(f"❌ Error processing image: {e}")
-    raise
-
-# Step 5: Get contour statistics
-print("\n📊 Analyzing contours...")
-user_stats = get_contour_statistics(user_img)
-ref_stats = get_contour_statistics(reference_img)
-
-# Step 6: Compare contours
-contour_comparison = compare_contours_detailed(user_img, reference_img)
-
-# Step 7: Get overall similarity scores
-overall_score, score_details = compare_drawings_combined(user_img, reference_img)
+# Step 7: Traditional comparison methods
+print("\n📊 Running similarity analysis...")
+overall_score, score_details = compare_drawings_combined(normalized_img, reference_img)
 
 # Step 8: Display results
 print("\n" + "=" * 60)
-print("📈 CONTOUR ANALYSIS RESULTS")
+print("📈 PREDICTION RESULTS")
 print("=" * 60)
 
-print(f"\n📐 Your Image Contours:")
-print(f"   • Total Contours (all): {user_stats['total_contours']}")
-print(f"   • External Contours: {user_stats['external_contour_count']}")
-print(f"   • Total Contour Points: {user_stats['total_points']}")
-print(f"   • External Contour Points: {user_stats['external_points']}")
-print(f"   • Total Contour Area: {user_stats['total_area']:.2f} pixels²")
+print(f"\n🤖 Model Prediction:")
+print(f"   • Predicted Category: {predicted_category.upper()}")
+print(f"   • Confidence: {model_confidence:.2%}")
+print(f"   • Expected Category: {category.upper()}")
 
-print(f"\n📐 QuickDraw Reference Contours:")
-print(f"   • Total Contours (all): {ref_stats['total_contours']}")
-print(f"   • External Contours: {ref_stats['external_contour_count']}")
-print(f"   • Total Contour Points: {ref_stats['total_points']}")
-print(f"   • External Contour Points: {ref_stats['external_points']}")
-print(f"   • Total Contour Area: {ref_stats['total_area']:.2f} pixels²")
+if predicted_category.lower() == category.lower():
+    print(f"   ✅ MATCH! Model correctly identified the drawing!")
+else:
+    print(f"   ❌ NO MATCH - Model predicted '{predicted_category}' but expected '{category}'")
 
-print(f"\n🔄 Contour Comparison:")
-print(f"   • Contours Compared: {contour_comparison['total_compared']}")
-print(f"   • Matched Contours (similarity > 0.5): {contour_comparison['matched_contours']}")
-print(f"   • Match Percentage: {contour_comparison['match_percentage']:.2f}%")
-print(f"   • Contour Similarity Score: {contour_comparison['similarity']:.2%}")
-
-print("\n" + "=" * 60)
-print("🎯 OVERALL SIMILARITY SCORES")
-print("=" * 60)
-print(f"\n📊 Combined Similarity Score: {overall_score:.2%}")
+print(f"\n📊 Similarity Scores:")
 print(f"   • SSIM Score: {score_details['ssim']:.2%}")
 print(f"   • Contour Match Score: {score_details['contour']:.2%}")
 print(f"   • Histogram Correlation: {score_details['histogram']:.2%}")
+print(f"   • Combined Similarity: {overall_score:.2%}")
+
+# Show top 3 predictions
+print(f"\n🔝 Top 3 Model Predictions:")
+sorted_indices = np.argsort(all_predictions)[::-1][:3]
+for i, idx in enumerate(sorted_indices, 1):
+    cat_name = get_category_from_index(idx, SIMPLE_WORDS)
+    conf = all_predictions[idx]
+    print(f"   {i}. {cat_name.upper()}: {conf:.2%}")
 
 # Step 9: Create visual comparison
 print("\n🖼️  Displaying visual comparison...")
-comparison_display = create_comparison_display(user_img, reference_img, original_img, extracted_img, 
-                                              category, user_stats, ref_stats, contour_comparison,
-                                              overall_score, score_details)
+comparison_display = create_comparison_display(normalized_img, reference_img, original_img, 
+                                              category, predicted_category, overall_score,
+                                              model_confidence, score_details)
 
-cv2.imshow("Image Comparison Results - Press any key to close", comparison_display)
+cv2.imshow("QuickDraw Model Comparison - Press any key to close", comparison_display)
 
 print("\n✅ Analysis complete! Press any key in the image window to close...")
 cv2.waitKey(0)
@@ -551,7 +378,8 @@ cv2.destroyAllWindows()
 print("\n" + "=" * 60)
 print("📋 SUMMARY")
 print("=" * 60)
-print(f"Overall Similarity: {overall_score:.2%}")
-print(f"Contour Match: {contour_comparison['matched_contours']}/{contour_comparison['total_compared']} ({contour_comparison['match_percentage']:.1f}%)")
-print(f"Your Contours: {user_stats['external_contour_count']} | Reference Contours: {ref_stats['external_contour_count']}")
+print(f"Model Prediction: {predicted_category.upper()} ({model_confidence:.2%})")
+print(f"Expected: {category.upper()}")
+print(f"Match: {'✅ YES' if predicted_category.lower() == category.lower() else '❌ NO'}")
+print(f"Similarity Score: {overall_score:.2%}")
 print("=" * 60)
