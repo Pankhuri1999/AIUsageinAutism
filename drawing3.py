@@ -4,7 +4,15 @@ from quickdraw import QuickDrawData
 from skimage.metrics import structural_similarity as ssim
 import time
 import random
-from collections import deque
+import os
+
+# ============================================
+# SET YOUR IMAGE PATH HERE
+# ============================================
+IMAGE_PATH = "path/to/your/image.jpg"  # Change this to your image path
+# Example: IMAGE_PATH = "C:/Users/YourName/Pictures/drawing.jpg"
+# Example: IMAGE_PATH = "./my_drawing.png"
+# Example: IMAGE_PATH = "drawing.jpg"  # If image is in same folder
 
 # --- Simple words for drawing game ---
 SIMPLE_WORDS = [
@@ -14,14 +22,6 @@ SIMPLE_WORDS = [
     "airplane", "bicycle", "cup", "spoon", "fork", "pencil",
     "book", "clock", "key", "umbrella", "rainbow", "butterfly"
 ]
-
-# Drawing color - fixed to blue
-DRAWING_COLOR = (255, 0, 0)  # Blue in BGR
-
-# Drawing modes
-DRAW_MODE = 0
-ERASE_MODE = 1
-current_mode = DRAW_MODE
 
 def get_random_word():
     """Get a random simple word from the list."""
@@ -72,87 +72,26 @@ def normalize_drawing(img):
     normalized = cv2.resize(square, (28, 28), interpolation=cv2.INTER_AREA)
     return normalized
 
-def preprocess_canvas(canvas):
-    """Preprocess user canvas drawing."""
-    gray = cv2.cvtColor(canvas, cv2.COLOR_BGR2GRAY)
-    _, thresh = cv2.threshold(gray, 50, 255, cv2.THRESH_BINARY_INV)
+def preprocess_uploaded_image(image_path):
+    """Preprocess uploaded image file."""
+    if not os.path.exists(image_path):
+        raise FileNotFoundError(f"Image file not found: {image_path}")
+    
+    # Read image
+    img = cv2.imread(image_path)
+    if img is None:
+        raise ValueError(f"Could not read image from: {image_path}")
+    
+    # Convert to grayscale
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    
+    # Apply threshold to get binary image
+    _, thresh = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY_INV)
+    
+    # Normalize the drawing
     normalized = normalize_drawing(thresh)
-    return normalized
-
-def detect_blue_object(frame):
-    """Detect blue colored object - multiple detection methods."""
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     
-    # Method 1: QuickDraw_V1 style (narrower range)
-    a1, b1, c1 = 120, 100, 15
-    Lower1 = np.array([a1-c1, 50+b1, 50])
-    Upper1 = np.array([a1+c1, 255, 255])
-    mask1 = cv2.inRange(hsv, Lower1, Upper1)
-    
-    # Method 2: Wider blue range
-    Lower2 = np.array([100, 50, 50])
-    Upper2 = np.array([130, 255, 255])
-    mask2 = cv2.inRange(hsv, Lower2, Upper2)
-    
-    # Method 3: Light blue range
-    Lower3 = np.array([90, 50, 50])
-    Upper3 = np.array([110, 255, 255])
-    mask3 = cv2.inRange(hsv, Lower3, Upper3)
-    
-    # Combine all masks
-    mask = cv2.bitwise_or(mask1, mask2)
-    mask = cv2.bitwise_or(mask, mask3)
-    
-    # Morphological operations
-    kernel = np.ones((5, 5), np.uint8)
-    mask = cv2.erode(mask, kernel, iterations=1)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-    mask = cv2.dilate(mask, kernel, iterations=2)
-    
-    # Find contours
-    cnts, heir = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[-2:]
-    center = None
-    circle_info = None
-    
-    if len(cnts) > 0:
-        # Sort by area and try largest ones
-        cnts_sorted = sorted(cnts, key=cv2.contourArea, reverse=True)
-        
-        for cnt in cnts_sorted:
-            area = cv2.contourArea(cnt)
-            # Lower threshold - accept smaller objects
-            if area > 100:  # Reduced from 200
-                M = cv2.moments(cnt)
-                if M['m00'] != 0:
-                    center = (int(M['m10'] / M['m00']), int(M['m01'] / M['m00']))
-                    ((x, y), radius) = cv2.minEnclosingCircle(cnt)
-                    circle_info = (int(x), int(y), int(radius))
-                    break  # Use first valid detection
-    
-    return center, mask, None, circle_info
-
-def calculate_focal_point(drawing_points, canvas_size):
-    """Calculate focal point for large drawings."""
-    if len(drawing_points) < 10:
-        return None, None
-    
-    points_array = np.array(drawing_points)
-    x_min, y_min = points_array.min(axis=0)
-    x_max, y_max = points_array.max(axis=0)
-    
-    width = x_max - x_min
-    height = y_max - y_min
-    
-    canvas_area = canvas_size[0] * canvas_size[1]
-    drawing_area = width * height
-    area_ratio = drawing_area / canvas_area
-    
-    if area_ratio > 0.4:
-        focal_x = (x_min + x_max) // 2
-        focal_y = (y_min + y_max) // 2
-        return (focal_x, focal_y), (width, height)
-    
-    return None, None
+    return normalized, img
 
 def get_contour_statistics(img):
     """Get detailed contour statistics from an image."""
@@ -278,353 +217,210 @@ def compare_drawings_combined(user_img, ref_img):
         'histogram': hist_score
     }
 
-def create_unified_frame(frame, canvas, mask, reference_img, category, center, circle_info, 
-                        pts, focal_point, show_mask=True):
-    """Create a single unified frame with drawing overlaid on camera feed."""
-    h, w = frame.shape[:2]
-    
-    # Create main display frame (1280x720)
-    display_h, display_w = 720, 1280
+def visualize_contours(img, stats, title="Contours"):
+    """Visualize contours on image."""
+    vis_img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    cv2.drawContours(vis_img, stats['external_contours'], -1, (0, 255, 0), 1)
+    cv2.drawContours(vis_img, stats['all_contours'], -1, (255, 0, 0), 1)
+    return vis_img
+
+def create_comparison_display(user_img, ref_img, original_img, category, user_stats, ref_stats, 
+                              contour_comparison, overall_score, score_details):
+    """Create a unified display showing comparison results."""
+    display_h, display_w = 800, 1200
     unified = np.ones((display_h, display_w, 3), dtype=np.uint8) * 240
     
     # Resize components
-    cam_w, cam_h = 640, 480
-    canvas_w, canvas_h = 400, 300
-    ref_w, ref_h = 200, 200
-    mask_w, mask_h = 200, 150
+    img_w, img_h = 300, 300
+    orig_w, orig_h = 300, 300
     
-    # Main camera feed with drawing overlay
-    frame_with_drawing = frame.copy()
+    # Original image
+    orig_resized = cv2.resize(original_img, (orig_w, orig_h))
+    unified[50:50+orig_h, 50:50+orig_w] = orig_resized
+    cv2.putText(unified, "Your Image", (50, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
     
-    # Draw the trail on camera feed
-    if len(pts) > 1:
-        for i in range(1, len(pts)):
-            if pts[i - 1] is None or pts[i] is None:
-                continue
-            if current_mode == DRAW_MODE:
-                cv2.line(frame_with_drawing, pts[i - 1], pts[i], DRAWING_COLOR, 4)
-            else:
-                cv2.line(frame_with_drawing, pts[i - 1], pts[i], (255, 255, 255), 6)
+    # User normalized image
+    user_colored = cv2.cvtColor(user_img, cv2.COLOR_GRAY2BGR)
+    user_resized = cv2.resize(user_colored, (img_w, img_h))
+    unified[50:50+img_h, 400:400+img_w] = user_resized
+    cv2.putText(unified, "Your Drawing (Normalized)", (400, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
     
-    # Draw circle and center point
-    if center is not None:
-        if circle_info is not None:
-            x, y, radius = circle_info
-            cv2.circle(frame_with_drawing, (x, y), radius, (0, 255, 255), 2)
-        cv2.circle(frame_with_drawing, center, 8, (0, 0, 255), -1)
-        cv2.putText(frame_with_drawing, "BLUE DETECTED", (center[0] - 60, center[1] - 30),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-    else:
-        # Show message when not detected
-        cv2.putText(frame_with_drawing, "NO BLUE DETECTED", (w//2 - 100, h//2),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-        cv2.putText(frame_with_drawing, "Show blue object to camera", (w//2 - 120, h//2 + 30),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+    # Reference image
+    ref_colored = cv2.cvtColor(ref_img, cv2.COLOR_GRAY2BGR)
+    ref_resized = cv2.resize(ref_colored, (img_w, img_h))
+    unified[50:50+img_h, 750:750+img_w] = ref_resized
+    cv2.putText(unified, f"QuickDraw: {category.upper()}", (750, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
     
-    # Resize frame with drawing
-    frame_resized = cv2.resize(frame_with_drawing, (cam_w, cam_h))
+    # Contour visualizations
+    user_vis = visualize_contours(user_img, user_stats)
+    ref_vis = visualize_contours(ref_img, ref_stats)
     
-    # Resize canvas
-    canvas_resized = cv2.resize(canvas, (canvas_w, canvas_h))
+    user_vis_resized = cv2.resize(user_vis, (img_w, img_h))
+    ref_vis_resized = cv2.resize(ref_vis, (img_w, img_h))
     
-    # Resize reference
-    ref_resized = cv2.resize(reference_img, (ref_w, ref_h))
-    ref_colored = cv2.cvtColor(ref_resized, cv2.COLOR_GRAY2BGR)
+    unified[400:400+img_h, 50:50+img_w] = user_vis_resized
+    cv2.putText(unified, "Your Contours", (50, 390), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
     
-    # Resize mask
-    if show_mask:
-        mask_colored = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
-        mask_resized = cv2.resize(mask_colored, (mask_w, mask_h))
+    unified[400:400+img_h, 400:400+img_w] = ref_vis_resized
+    cv2.putText(unified, "Reference Contours", (400, 390), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
     
-    # Layout
-    y_offset_top = 50
+    # Results panel
+    results_x = 750
+    results_y = 400
+    results_w = 400
+    results_h = 300
     
-    # Camera feed with drawing overlay
-    unified[y_offset_top:y_offset_top+cam_h, 10:10+cam_w] = frame_resized
+    cv2.rectangle(unified, (results_x, results_y), (results_x + results_w, results_y + results_h), 
+                 (200, 200, 200), -1)
+    cv2.rectangle(unified, (results_x, results_y), (results_x + results_w, results_y + results_h), 
+                 (0, 0, 0), 2)
     
-    # Focal point
-    if focal_point[0] is not None:
-        fx, fy = focal_point[0]
-        scale_x = cam_w / w
-        scale_y = cam_h / h
-        fx_scaled = int(fx * scale_x)
-        fy_scaled = int(fy * scale_y)
-        cv2.circle(unified, (10 + fx_scaled, y_offset_top + fy_scaled), 20, (255, 0, 255), 3)
+    y_pos = results_y + 30
+    line_height = 25
     
-    # Canvas
-    canvas_x = 10 + cam_w + 10
-    unified[y_offset_top:y_offset_top+canvas_h, canvas_x:canvas_x+canvas_w] = canvas_resized
-    
-    # Reference
-    ref_x = canvas_x + canvas_w + 10
-    unified[y_offset_top:y_offset_top+ref_h, ref_x:ref_x+ref_w] = ref_colored
-    
-    # Bottom row
-    y_offset_bottom = y_offset_top + canvas_h + 20
-    
-    # Mask
-    if show_mask:
-        unified[y_offset_bottom:y_offset_bottom+mask_h, 10:10+mask_w] = mask_resized
-        cv2.putText(unified, "MASK (white=detected)", (10, y_offset_bottom - 5),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 0), 1)
-    
-    # Info panel
-    info_x = 10 + mask_w + 10 if show_mask else 10
-    info_y = y_offset_bottom
-    info_w = 400
-    info_h = 150
-    
-    cv2.rectangle(unified, (info_x, info_y), (info_x + info_w, info_y + info_h), (200, 200, 200), -1)
-    cv2.rectangle(unified, (info_x, info_y), (info_x + info_w, info_y + info_h), (0, 0, 0), 2)
-    
-    line_height = 20
-    y_pos = info_y + 25
-    
-    cv2.putText(unified, f"Category: {category.upper()}", (info_x + 10, y_pos),
+    cv2.putText(unified, f"Category: {category.upper()}", (results_x + 10, y_pos),
                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
     y_pos += line_height
     
-    cv2.putText(unified, f"Color: BLUE", (info_x + 10, y_pos),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.6, DRAWING_COLOR, 2)
+    cv2.putText(unified, f"Overall Score: {overall_score:.2%}", (results_x + 10, y_pos),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
     y_pos += line_height
     
-    mode_text = "ERASE" if current_mode == ERASE_MODE else "DRAW"
-    cv2.putText(unified, f"Mode: {mode_text}", (info_x + 10, y_pos),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+    cv2.putText(unified, f"SSIM: {score_details['ssim']:.2%}", (results_x + 10, y_pos),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
     y_pos += line_height
     
-    if center:
-        cv2.putText(unified, f"Tracking: ACTIVE", (info_x + 10, y_pos),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-        y_pos += line_height
-        cv2.putText(unified, f"Points: {len(pts)}", (info_x + 10, y_pos),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
-    else:
-        cv2.putText(unified, f"Tracking: INACTIVE", (info_x + 10, y_pos),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-        y_pos += line_height
-        cv2.putText(unified, f"Show blue object!", (info_x + 10, y_pos),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
+    cv2.putText(unified, f"Contour: {score_details['contour']:.2%}", (results_x + 10, y_pos),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+    y_pos += line_height
     
-    # Instructions
-    inst_x = 10
-    inst_y = display_h - 80
-    cv2.putText(unified, "Controls: 's'=Submit | 'c'=Clear | 'e'=Erase | 'd'=Draw | 'n'=New Word | 'q'=Quit",
-               (inst_x, inst_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
-    cv2.putText(unified, "Check MASK window - white areas = detected blue. Draw on camera feed!",
-               (inst_x, inst_y + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+    cv2.putText(unified, f"Histogram: {score_details['histogram']:.2%}", (results_x + 10, y_pos),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+    y_pos += line_height
+    
+    cv2.putText(unified, f"Contours Matched: {contour_comparison['matched_contours']}/{contour_comparison['total_compared']}",
+               (results_x + 10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+    y_pos += line_height
+    
+    cv2.putText(unified, f"Match %: {contour_comparison['match_percentage']:.1f}%",
+               (results_x + 10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
     
     # Title
-    cv2.putText(unified, "QuickDraw Air Drawing - Draw on Camera Feed", (10, 30),
+    cv2.putText(unified, "Image Comparison with QuickDraw Dataset", (50, 30),
                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
     
     return unified
 
-def main():
-    """Main function to compare air drawing with QuickDraw shapes."""
-    global current_mode
-    
-    print("=" * 60)
-    print("🎨 Air Drawing Comparison with QuickDraw Dataset")
-    print("=" * 60)
-    
-    # Get category from user
-    print("\nAvailable categories:")
-    for i, word in enumerate(SIMPLE_WORDS, 1):
-        print(f"  {i:2d}. {word}")
-    
-    category_input = input("\nEnter category name or number: ").strip().lower()
-    
-    try:
-        category_num = int(category_input)
-        if 1 <= category_num <= len(SIMPLE_WORDS):
-            category = SIMPLE_WORDS[category_num - 1]
-        else:
-            category = SIMPLE_WORDS[0]
-    except ValueError:
-        if category_input in SIMPLE_WORDS:
-            category = category_input
-        else:
-            category = SIMPLE_WORDS[0]
-    
-    print(f"\n🎨 Draw: {category.upper()}")
-    print("=" * 60)
-    
-    # Get reference drawing
-    try:
-        drawing = get_quickdraw_reference(category)
-        reference_img = render_drawing_to_image(drawing)
-        reference_img = normalize_drawing(reference_img)
-    except Exception as e:
-        print(f"❌ Error: {e}")
-        return
-    
-    print("\nInstructions:")
-    print("  • Show a BLUE colored object to the camera")
-    print("  • Check the MASK window (bottom left) - white = detected blue")
-    print("  • Move the blue object to draw - you'll see your drawing on camera feed!")
-    print("  • Press 'e' to toggle eraser mode")
-    print("  • Press 'd' to toggle draw mode")
-    print("  • Press 's' to submit your drawing")
-    print("  • Press 'c' to clear canvas")
-    print("  • Press 'q' to quit")
-    print("  • Press 'n' for a new random word\n")
-    
-    # Open webcam
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        print("Error: Could not open webcam")
-        return
-    
-    time.sleep(2)
-    
-    # Use deque for point tracking
-    pts = deque(maxlen=512)
-    blackboard = np.zeros((480, 640, 3), dtype=np.uint8)
-    
-    drawing_active = False
-    
-    print("Starting detection...")
-    print("TIP: Check the MASK window - if you see white areas when showing blue object, detection is working!")
-    
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        
-        frame = cv2.flip(frame, 1)
-        
-        # Detect blue object
-        center, mask, contour, circle_info = detect_blue_object(frame)
-        
-        # Track points
-        if center is not None:
-            pts.appendleft(center)
-            drawing_active = True
-        else:
-            # Keep drawing even if briefly lost
-            if len(pts) > 0:
-                # Allow small gaps
-                pass
-        
-        # Draw on blackboard
-        if len(pts) > 1:
-            for i in range(1, len(pts)):
-                if pts[i - 1] is None or pts[i] is None:
-                    continue
-                if current_mode == DRAW_MODE:
-                    cv2.line(blackboard, pts[i - 1], pts[i], (255, 255, 255), 7)
-                else:
-                    cv2.line(blackboard, pts[i - 1], pts[i], (0, 0, 0), 10)
-        
-        # Calculate focal point
-        drawing_points = [p for p in pts if p is not None]
-        focal_point, focal_size = calculate_focal_point(drawing_points, frame.shape[:2])
-        
-        # Create unified frame
-        unified_frame = create_unified_frame(frame, blackboard, mask, reference_img, category,
-                                           center, circle_info, pts, (focal_point, focal_size))
-        
-        cv2.imshow("QuickDraw Air Drawing - Draw on Camera Feed", unified_frame)
-        
-        key = cv2.waitKey(1) & 0xFF
-        
-        if key == ord('s'):
-            if drawing_active and len(pts) > 10:
-                break
-            else:
-                print("⚠️  Please draw something first! Check MASK window to verify blue detection.")
-        elif key == ord('c'):
-            blackboard = np.zeros((480, 640, 3), dtype=np.uint8)
-            pts = deque(maxlen=512)
-            drawing_active = False
-            print("Canvas cleared!")
-        elif key == ord('e'):
-            current_mode = ERASE_MODE
-            print("Eraser mode activated")
-        elif key == ord('d'):
-            current_mode = DRAW_MODE
-            print("Draw mode activated")
-        elif key == ord('n'):
-            category = get_random_word()
-            blackboard = np.zeros((480, 640, 3), dtype=np.uint8)
-            pts = deque(maxlen=512)
-            drawing_active = False
-            try:
-                drawing = get_quickdraw_reference(category)
-                reference_img = render_drawing_to_image(drawing)
-                reference_img = normalize_drawing(reference_img)
-            except ValueError as e:
-                print(f"Error: {e}")
-        elif key == ord('q'):
-            cap.release()
-            cv2.destroyAllWindows()
-            return
-    
-    cap.release()
-    cv2.destroyAllWindows()
-    
-    # Validation
-    drawing_points = [p for p in pts if p is not None]
-    if len(drawing_points) < 10:
-        print("\n⚠️  Drawing too short!")
-        return
-    
-    # Process and analyze
-    print("\n📊 Processing your drawing...")
-    user_img = preprocess_canvas(blackboard)
-    
-    user_pixels = np.sum(user_img == 0)
-    if user_pixels < 50:
-        print("\n⚠️  Drawing too sparse!")
-        return
-    
-    # Get contour statistics
-    print("📊 Analyzing contours...")
-    user_stats = get_contour_statistics(user_img)
-    ref_stats = get_contour_statistics(reference_img)
-    contour_comparison = compare_contours_detailed(user_img, reference_img)
-    overall_score, score_details = compare_drawings_combined(user_img, reference_img)
-    
-    # Display results
-    print("\n" + "=" * 60)
-    print("📈 CONTOUR ANALYSIS RESULTS")
-    print("=" * 60)
-    print(f"\n📐 User Drawing Contours:")
-    print(f"   • Total Contours (all): {user_stats['total_contours']}")
-    print(f"   • External Contours: {user_stats['external_contour_count']}")
-    print(f"   • Total Contour Points: {user_stats['total_points']}")
-    print(f"   • External Contour Points: {user_stats['external_points']}")
-    print(f"   • Total Contour Area: {user_stats['total_area']:.2f} pixels²")
-    
-    print(f"\n📐 QuickDraw Reference Contours:")
-    print(f"   • Total Contours (all): {ref_stats['total_contours']}")
-    print(f"   • External Contours: {ref_stats['external_contour_count']}")
-    print(f"   • Total Contour Points: {ref_stats['total_points']}")
-    print(f"   • External Contour Points: {ref_stats['external_points']}")
-    print(f"   • Total Contour Area: {ref_stats['total_area']:.2f} pixels²")
-    
-    print(f"\n🔄 Contour Comparison:")
-    print(f"   • Contours Compared: {contour_comparison['total_compared']}")
-    print(f"   • Matched Contours (similarity > 0.5): {contour_comparison['matched_contours']}")
-    print(f"   • Match Percentage: {contour_comparison['match_percentage']:.2f}%")
-    print(f"   • Contour Similarity Score: {contour_comparison['similarity']:.2%}")
-    
-    print("\n" + "=" * 60)
-    print("🎯 OVERALL SIMILARITY SCORES")
-    print("=" * 60)
-    print(f"\n📊 Combined Similarity Score: {overall_score:.2%}")
-    print(f"   • SSIM Score: {score_details['ssim']:.2%}")
-    print(f"   • Contour Match Score: {score_details['contour']:.2%}")
-    print(f"   • Histogram Correlation: {score_details['histogram']:.2%}")
-    
-    print("\n" + "=" * 60)
-    print("📋 SUMMARY")
-    print("=" * 60)
-    print(f"Overall Similarity: {overall_score:.2%}")
-    print(f"Contour Match: {contour_comparison['matched_contours']}/{contour_comparison['total_compared']} ({contour_comparison['match_percentage']:.1f}%)")
-    print(f"User Contours: {user_stats['external_contour_count']} | Reference Contours: {ref_stats['external_contour_count']}")
-    print("=" * 60)
+# ============================================
+# MAIN EXECUTION
+# ============================================
+print("=" * 60)
+print("🎨 Image Comparison with QuickDraw Dataset")
+print("=" * 60)
 
-if __name__ == "__main__":
-    main()
+# Get category from user
+print("\nAvailable categories:")
+for i, word in enumerate(SIMPLE_WORDS, 1):
+    print(f"  {i:2d}. {word}")
+
+category_input = input("\nEnter category name or number: ").strip().lower()
+
+try:
+    category_num = int(category_input)
+    if 1 <= category_num <= len(SIMPLE_WORDS):
+        category = SIMPLE_WORDS[category_num - 1]
+    else:
+        category = SIMPLE_WORDS[0]
+except ValueError:
+    if category_input in SIMPLE_WORDS:
+        category = category_input
+    else:
+        category = SIMPLE_WORDS[0]
+
+print(f"\n🎨 Comparing with: {category.upper()}")
+print("=" * 60)
+
+# Load and preprocess uploaded image
+try:
+    print(f"\n📂 Loading image: {IMAGE_PATH}")
+    user_img, original_img = preprocess_uploaded_image(IMAGE_PATH)
+    print("✅ Image loaded and preprocessed successfully")
+except Exception as e:
+    print(f"❌ Error loading image: {e}")
+    print(f"   Make sure IMAGE_PATH is set correctly at the top of the code!")
+    raise
+
+# Get reference drawing from QuickDraw
+try:
+    print(f"🔍 Fetching QuickDraw reference for '{category}'...")
+    drawing = get_quickdraw_reference(category)
+    reference_img = render_drawing_to_image(drawing)
+    reference_img = normalize_drawing(reference_img)
+    print("✅ Reference drawing loaded successfully")
+except Exception as e:
+    print(f"❌ Error loading QuickDraw reference: {e}")
+    raise
+
+# Get contour statistics
+print("\n📊 Analyzing contours...")
+user_stats = get_contour_statistics(user_img)
+ref_stats = get_contour_statistics(reference_img)
+
+# Compare contours in detail
+contour_comparison = compare_contours_detailed(user_img, reference_img)
+
+# Get overall similarity scores
+overall_score, score_details = compare_drawings_combined(user_img, reference_img)
+
+# Display results
+print("\n" + "=" * 60)
+print("📈 CONTOUR ANALYSIS RESULTS")
+print("=" * 60)
+
+print(f"\n📐 Your Image Contours:")
+print(f"   • Total Contours (all): {user_stats['total_contours']}")
+print(f"   • External Contours: {user_stats['external_contour_count']}")
+print(f"   • Total Contour Points: {user_stats['total_points']}")
+print(f"   • External Contour Points: {user_stats['external_points']}")
+print(f"   • Total Contour Area: {user_stats['total_area']:.2f} pixels²")
+
+print(f"\n📐 QuickDraw Reference Contours:")
+print(f"   • Total Contours (all): {ref_stats['total_contours']}")
+print(f"   • External Contours: {ref_stats['external_contour_count']}")
+print(f"   • Total Contour Points: {ref_stats['total_points']}")
+print(f"   • External Contour Points: {ref_stats['external_points']}")
+print(f"   • Total Contour Area: {ref_stats['total_area']:.2f} pixels²")
+
+print(f"\n🔄 Contour Comparison:")
+print(f"   • Contours Compared: {contour_comparison['total_compared']}")
+print(f"   • Matched Contours (similarity > 0.5): {contour_comparison['matched_contours']}")
+print(f"   • Match Percentage: {contour_comparison['match_percentage']:.2f}%")
+print(f"   • Contour Similarity Score: {contour_comparison['similarity']:.2%}")
+
+print("\n" + "=" * 60)
+print("🎯 OVERALL SIMILARITY SCORES")
+print("=" * 60)
+print(f"\n📊 Combined Similarity Score: {overall_score:.2%}")
+print(f"   • SSIM Score: {score_details['ssim']:.2%}")
+print(f"   • Contour Match Score: {score_details['contour']:.2%}")
+print(f"   • Histogram Correlation: {score_details['histogram']:.2%}")
+
+# Create visual comparison
+print("\n🖼️  Displaying visual comparison...")
+comparison_display = create_comparison_display(user_img, reference_img, original_img, category,
+                                              user_stats, ref_stats, contour_comparison,
+                                              overall_score, score_details)
+
+cv2.imshow("Image Comparison Results - Press any key to close", comparison_display)
+
+print("\n✅ Analysis complete! Press any key in the image window to close...")
+cv2.waitKey(0)
+cv2.destroyAllWindows()
+
+print("\n" + "=" * 60)
+print("📋 SUMMARY")
+print("=" * 60)
+print(f"Overall Similarity: {overall_score:.2%}")
+print(f"Contour Match: {contour_comparison['matched_contours']}/{contour_comparison['total_compared']} ({contour_comparison['match_percentage']:.1f}%)")
+print(f"Your Contours: {user_stats['external_contour_count']} | Reference Contours: {ref_stats['external_contour_count']}")
+print("=" * 60)
