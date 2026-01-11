@@ -3,8 +3,14 @@ import numpy as np
 from quickdraw import QuickDrawData
 from skimage.metrics import structural_similarity as ssim
 import os
-from keras.models import load_model
-from PIL import Image
+try:
+    from tensorflow.keras.models import load_model
+except ImportError:
+    try:
+        from keras.models import load_model
+    except ImportError:
+        print("Error: Please install tensorflow or keras")
+        raise
 
 # --- Simple words for drawing game ---
 SIMPLE_WORDS = [
@@ -101,9 +107,21 @@ def load_quickdraw_model(model_path):
         raise FileNotFoundError(f"Model file not found: {model_path}")
     
     print(f"📦 Loading model from {model_path}...")
-    model = load_model(model_path)
-    print("✅ Model loaded successfully")
-    return model
+    try:
+        model = load_model(model_path)
+        print("✅ Model loaded successfully")
+        return model
+    except Exception as e:
+        print(f"❌ Error loading model: {e}")
+        print("   Trying alternative loading method...")
+        # Try with compile=False if model was saved without optimizer
+        try:
+            model = load_model(model_path, compile=False)
+            print("✅ Model loaded successfully (without compilation)")
+            return model
+        except Exception as e2:
+            print(f"❌ Alternative loading also failed: {e2}")
+            raise
 
 def get_category_from_index(index, category_list):
     """Get category name from model prediction index."""
