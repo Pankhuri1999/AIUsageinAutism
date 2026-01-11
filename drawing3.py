@@ -3,11 +3,18 @@ import numpy as np
 from quickdraw import QuickDrawData
 from skimage.metrics import structural_similarity as ssim
 import os
+import h5py
+
+# Try different import methods
 try:
+    import tensorflow as tf
+    from tensorflow import keras
     from tensorflow.keras.models import load_model
+    TF_AVAILABLE = True
 except ImportError:
     try:
         from keras.models import load_model
+        TF_AVAILABLE = False
     except ImportError:
         print("Error: Please install tensorflow or keras")
         raise
@@ -102,26 +109,73 @@ def keras_predict(model, image):
     return confidence, pred_class_idx, pred_probab
 
 def load_quickdraw_model(model_path):
-    """Load the QuickDraw model."""
+    """Load the QuickDraw model with multiple fallback methods."""
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Model file not found: {model_path}")
     
     print(f"📦 Loading model from {model_path}...")
+    
+    # Method 1: Try loading with compile=False
     try:
-        model = load_model(model_path)
-        print("✅ Model loaded successfully")
+        print("   Trying method 1: load_model with compile=False...")
+        model = load_model(model_path, compile=False)
+        print("✅ Model loaded successfully (method 1)")
         return model
-    except Exception as e:
-        print(f"❌ Error loading model: {e}")
-        print("   Trying alternative loading method...")
-        # Try with compile=False if model was saved without optimizer
-        try:
+    except Exception as e1:
+        print(f"   Method 1 failed: {str(e1)[:100]}")
+    
+    # Method 2: Try loading with safe_mode=False (for older models)
+    try:
+        print("   Trying method 2: load_model with safe_mode=False...")
+        if TF_AVAILABLE:
+            model = load_model(model_path, compile=False, safe_mode=False)
+        else:
             model = load_model(model_path, compile=False)
-            print("✅ Model loaded successfully (without compilation)")
+        print("✅ Model loaded successfully (method 2)")
+        return model
+    except Exception as e2:
+        print(f"   Method 2 failed: {str(e2)[:100]}")
+    
+    # Method 3: Try using tf.keras.models.load_model directly
+    if TF_AVAILABLE:
+        try:
+            print("   Trying method 3: tf.keras.models.load_model...")
+            model = tf.keras.models.load_model(model_path, compile=False)
+            print("✅ Model loaded successfully (method 3)")
             return model
-        except Exception as e2:
-            print(f"❌ Alternative loading also failed: {e2}")
-            raise
+        except Exception as e3:
+            print(f"   Method 3 failed: {str(e3)[:100]}")
+    
+    # Method 4: Try loading weights only (if model architecture is known)
+    try:
+        print("   Trying method 4: Loading with custom_objects...")
+        # This might work if we bypass some compatibility checks
+        import json
+        with h5py.File(model_path, 'r') as f:
+            model_config = f.attrs.get('model_config')
+            if model_config:
+                if isinstance(model_config, bytes):
+                    model_config = model_config.decode('utf-8')
+                model_config = json.loads(model_config)
+        
+        # Try to reconstruct model
+        if TF_AVAILABLE:
+            model = tf.keras.models.model_from_json(model_config)
+            model.load_weights(model_path)
+            print("✅ Model loaded successfully (method 4 - weights only)")
+            return model
+    except Exception as e4:
+        print(f"   Method 4 failed: {str(e4)[:100]}")
+    
+    # If all methods fail, provide helpful error message
+    raise RuntimeError(
+        f"❌ Could not load model with any method. "
+        f"The model file may be incompatible with your Keras/TensorFlow version. "
+        f"Try:\n"
+        f"  1. Downgrade: pip install tensorflow==2.10.0\n"
+        f"  2. Or upgrade: pip install --upgrade tensorflow\n"
+        f"  3. Or use a model saved with your current version"
+    )
 
 def get_category_from_index(index, category_list):
     """Get category name from model prediction index."""
@@ -281,9 +335,14 @@ print("=" * 60)
 try:
     model = load_quickdraw_model(MODEL_PATH)
 except Exception as e:
-    print(f"❌ Error loading model: {e}")
-    print(f"   Please make sure MODEL_PATH is set correctly at the top of the code")
-    print(f"   Current path: {MODEL_PATH}")
+    print(f"\n❌ Error loading model: {e}")
+    print(f"\n💡 Troubleshooting tips:")
+    print(f"   1. Check if MODEL_PATH is correct: {MODEL_PATH}")
+    print(f"   2. Try installing compatible TensorFlow version:")
+    print(f"      pip install tensorflow==2.10.0")
+    print(f"   3. Or try upgrading:")
+    print(f"      pip install --upgrade tensorflow")
+    print(f"   4. The model file may need to be re-saved with your current version")
     raise
 
 # Step 2: Get category
