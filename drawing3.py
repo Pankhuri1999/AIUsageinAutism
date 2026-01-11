@@ -6,14 +6,6 @@ import time
 import random
 import os
 
-# ============================================
-# SET YOUR IMAGE PATH HERE
-# ============================================
-IMAGE_PATH = "path/to/your/image.jpg"  # Change this to your image path
-# Example: IMAGE_PATH = "C:/Users/YourName/Pictures/drawing.jpg"
-# Example: IMAGE_PATH = "./my_drawing.png"
-# Example: IMAGE_PATH = "drawing.jpg"  # If image is in same folder
-
 # --- Simple words for drawing game ---
 SIMPLE_WORDS = [
     "cat", "dog", "tree", "house", "car", "sun", "moon", "star",
@@ -72,16 +64,8 @@ def normalize_drawing(img):
     normalized = cv2.resize(square, (28, 28), interpolation=cv2.INTER_AREA)
     return normalized
 
-def preprocess_uploaded_image(image_path):
-    """Preprocess uploaded image file."""
-    if not os.path.exists(image_path):
-        raise FileNotFoundError(f"Image file not found: {image_path}")
-    
-    # Read image
-    img = cv2.imread(image_path)
-    if img is None:
-        raise ValueError(f"Could not read image from: {image_path}")
-    
+def preprocess_captured_image(img):
+    """Preprocess captured image."""
     # Convert to grayscale
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
@@ -92,6 +76,79 @@ def preprocess_uploaded_image(image_path):
     normalized = normalize_drawing(thresh)
     
     return normalized, img
+
+def capture_photo_from_camera():
+    """Capture a photo from webcam."""
+    cap = cv2.VideoCapture(0)
+    
+    if not cap.isOpened():
+        raise RuntimeError("Error: Could not open webcam")
+    
+    print("\n" + "=" * 60)
+    print("📸 Camera Capture Mode")
+    print("=" * 60)
+    print("\nInstructions:")
+    print("  • Position your drawing in front of the camera")
+    print("  • Press SPACEBAR or 'c' to CAPTURE the photo")
+    print("  • Press 'q' to QUIT without capturing")
+    print("  • Make sure your drawing is well-lit and clearly visible")
+    print("\nReady to capture...")
+    
+    captured_image = None
+    
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            print("Error: Could not read from camera")
+            break
+        
+        # Flip frame horizontally for mirror effect
+        frame = cv2.flip(frame, 1)
+        
+        # Add instructions overlay
+        h, w = frame.shape[:2]
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (10, 10), (w - 10, 120), (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
+        
+        cv2.putText(frame, "Position your drawing and press SPACEBAR to CAPTURE", 
+                   (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        cv2.putText(frame, "Press 'q' to quit", 
+                   (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        cv2.putText(frame, "Press 'c' or SPACEBAR to capture", 
+                   (20, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        
+        # Draw a border to guide positioning
+        border_thickness = 3
+        cv2.rectangle(frame, (50, 50), (w - 50, h - 50), (0, 255, 0), border_thickness)
+        cv2.putText(frame, "Position drawing here", (w//2 - 100, 40), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        
+        cv2.imshow("Camera - Press SPACEBAR to Capture Photo", frame)
+        
+        key = cv2.waitKey(1) & 0xFF
+        
+        if key == ord(' ') or key == ord('c'):  # Spacebar or 'c' to capture
+            captured_image = frame.copy()
+            print("\n✅ Photo captured!")
+            
+            # Show captured image briefly
+            cv2.putText(captured_image, "CAPTURED! Processing...", 
+                       (w//2 - 150, h//2), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 3)
+            cv2.imshow("Camera - Press SPACEBAR to Capture Photo", captured_image)
+            cv2.waitKey(1000)  # Show for 1 second
+            break
+        
+        elif key == ord('q'):
+            print("\n❌ Capture cancelled")
+            cap.release()
+            cv2.destroyAllWindows()
+            return None
+    
+    cap.release()
+    cv2.destroyAllWindows()
+    
+    return captured_image
 
 def get_contour_statistics(img):
     """Get detailed contour statistics from an image."""
@@ -237,7 +294,7 @@ def create_comparison_display(user_img, ref_img, original_img, category, user_st
     # Original image
     orig_resized = cv2.resize(original_img, (orig_w, orig_h))
     unified[50:50+orig_h, 50:50+orig_w] = orig_resized
-    cv2.putText(unified, "Your Image", (50, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
+    cv2.putText(unified, "Your Captured Image", (50, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
     
     # User normalized image
     user_colored = cv2.cvtColor(user_img, cv2.COLOR_GRAY2BGR)
@@ -318,7 +375,14 @@ print("=" * 60)
 print("🎨 Image Comparison with QuickDraw Dataset")
 print("=" * 60)
 
-# Get category from user
+# Step 1: Capture photo from camera
+captured_image = capture_photo_from_camera()
+
+if captured_image is None:
+    print("\n❌ No image captured. Exiting...")
+    exit()
+
+# Step 2: Get category from user
 print("\nAvailable categories:")
 for i, word in enumerate(SIMPLE_WORDS, 1):
     print(f"  {i:2d}. {word}")
@@ -340,17 +404,16 @@ except ValueError:
 print(f"\n🎨 Comparing with: {category.upper()}")
 print("=" * 60)
 
-# Load and preprocess uploaded image
+# Step 3: Preprocess captured image
 try:
-    print(f"\n📂 Loading image: {IMAGE_PATH}")
-    user_img, original_img = preprocess_uploaded_image(IMAGE_PATH)
-    print("✅ Image loaded and preprocessed successfully")
+    print("\n📊 Processing captured image...")
+    user_img, original_img = preprocess_captured_image(captured_image)
+    print("✅ Image processed successfully")
 except Exception as e:
-    print(f"❌ Error loading image: {e}")
-    print(f"   Make sure IMAGE_PATH is set correctly at the top of the code!")
+    print(f"❌ Error processing image: {e}")
     raise
 
-# Get reference drawing from QuickDraw
+# Step 4: Get reference drawing from QuickDraw
 try:
     print(f"🔍 Fetching QuickDraw reference for '{category}'...")
     drawing = get_quickdraw_reference(category)
@@ -361,18 +424,18 @@ except Exception as e:
     print(f"❌ Error loading QuickDraw reference: {e}")
     raise
 
-# Get contour statistics
+# Step 5: Get contour statistics
 print("\n📊 Analyzing contours...")
 user_stats = get_contour_statistics(user_img)
 ref_stats = get_contour_statistics(reference_img)
 
-# Compare contours in detail
+# Step 6: Compare contours in detail
 contour_comparison = compare_contours_detailed(user_img, reference_img)
 
-# Get overall similarity scores
+# Step 7: Get overall similarity scores
 overall_score, score_details = compare_drawings_combined(user_img, reference_img)
 
-# Display results
+# Step 8: Display results
 print("\n" + "=" * 60)
 print("📈 CONTOUR ANALYSIS RESULTS")
 print("=" * 60)
@@ -405,7 +468,7 @@ print(f"   • SSIM Score: {score_details['ssim']:.2%}")
 print(f"   • Contour Match Score: {score_details['contour']:.2%}")
 print(f"   • Histogram Correlation: {score_details['histogram']:.2%}")
 
-# Create visual comparison
+# Step 9: Create visual comparison
 print("\n🖼️  Displaying visual comparison...")
 comparison_display = create_comparison_display(user_img, reference_img, original_img, category,
                                               user_stats, ref_stats, contour_comparison,
