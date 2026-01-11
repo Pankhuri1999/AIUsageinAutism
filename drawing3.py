@@ -77,7 +77,7 @@ def preprocess_captured_image(img):
     
     return normalized, img
 
-def capture_photo_from_camera():
+def capture_photo_from_camera(category):
     """Capture a photo from webcam."""
     cap = cv2.VideoCapture(0)
     
@@ -87,6 +87,7 @@ def capture_photo_from_camera():
     print("\n" + "=" * 60)
     print("📸 Camera Capture Mode")
     print("=" * 60)
+    print(f"\nCategory: {category.upper()}")
     print("\nInstructions:")
     print("  • Position your drawing in front of the camera")
     print("  • Press SPACEBAR or 'c' to CAPTURE the photo")
@@ -108,15 +109,17 @@ def capture_photo_from_camera():
         # Add instructions overlay
         h, w = frame.shape[:2]
         overlay = frame.copy()
-        cv2.rectangle(overlay, (10, 10), (w - 10, 120), (0, 0, 0), -1)
+        cv2.rectangle(overlay, (10, 10), (w - 10, 140), (0, 0, 0), -1)
         cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
         
+        cv2.putText(frame, f"Draw: {category.upper()}", 
+                   (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
         cv2.putText(frame, "Position your drawing and press SPACEBAR to CAPTURE", 
-                   (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                   (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
         cv2.putText(frame, "Press 'q' to quit", 
-                   (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                   (20, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         cv2.putText(frame, "Press 'c' or SPACEBAR to capture", 
-                   (20, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                   (20, 130), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         
         # Draw a border to guide positioning
         border_thickness = 3
@@ -124,7 +127,7 @@ def capture_photo_from_camera():
         cv2.putText(frame, "Position drawing here", (w//2 - 100, 40), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
         
-        cv2.imshow("Camera - Press SPACEBAR to Capture Photo", frame)
+        cv2.imshow(f"Camera - Draw: {category.upper()} - Press SPACEBAR to Capture", frame)
         
         key = cv2.waitKey(1) & 0xFF
         
@@ -135,7 +138,7 @@ def capture_photo_from_camera():
             # Show captured image briefly
             cv2.putText(captured_image, "CAPTURED! Processing...", 
                        (w//2 - 150, h//2), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 3)
-            cv2.imshow("Camera - Press SPACEBAR to Capture Photo", captured_image)
+            cv2.imshow(f"Camera - Draw: {category.upper()} - Press SPACEBAR to Capture", captured_image)
             cv2.waitKey(1000)  # Show for 1 second
             break
         
@@ -186,9 +189,10 @@ def compare_contours_detailed(user_img, ref_img):
         return {
             'similarity': 0.0,
             'matched_contours': 0,
+            'total_compared': 0,  # Fixed: Added missing key
             'match_percentage': 0.0,
-            'user_total': 0,
-            'ref_total': 0,
+            'user_total': len(user_contours),
+            'ref_total': len(ref_contours),
             'user_stats': user_stats,
             'ref_stats': ref_stats
         }
@@ -223,7 +227,7 @@ def compare_contours_detailed(user_img, ref_img):
     return {
         'similarity': avg_similarity,
         'matched_contours': good_matches,
-        'total_compared': len(matched_pairs),
+        'total_compared': len(matched_pairs),  # Fixed: Always included
         'match_percentage': match_percentage,
         'user_total': len(user_contours),
         'ref_total': len(ref_contours),
@@ -369,20 +373,13 @@ def create_comparison_display(user_img, ref_img, original_img, category, user_st
     return unified
 
 # ============================================
-# MAIN EXECUTION
+# MAIN EXECUTION - CORRECT ORDER
 # ============================================
 print("=" * 60)
 print("🎨 Image Comparison with QuickDraw Dataset")
 print("=" * 60)
 
-# Step 1: Capture photo from camera
-captured_image = capture_photo_from_camera()
-
-if captured_image is None:
-    print("\n❌ No image captured. Exiting...")
-    exit()
-
-# Step 2: Get category from user
+# Step 1: Get category FIRST
 print("\nAvailable categories:")
 for i, word in enumerate(SIMPLE_WORDS, 1):
     print(f"  {i:2d}. {word}")
@@ -401,27 +398,35 @@ except ValueError:
     else:
         category = SIMPLE_WORDS[0]
 
-print(f"\n🎨 Comparing with: {category.upper()}")
+print(f"\n🎨 Selected Category: {category.upper()}")
 print("=" * 60)
 
-# Step 3: Preprocess captured image
-try:
-    print("\n📊 Processing captured image...")
-    user_img, original_img = preprocess_captured_image(captured_image)
-    print("✅ Image processed successfully")
-except Exception as e:
-    print(f"❌ Error processing image: {e}")
-    raise
-
-# Step 4: Get reference drawing from QuickDraw
+# Step 2: Get reference drawing from QuickDraw (to show what to draw)
 try:
     print(f"🔍 Fetching QuickDraw reference for '{category}'...")
     drawing = get_quickdraw_reference(category)
     reference_img = render_drawing_to_image(drawing)
     reference_img = normalize_drawing(reference_img)
     print("✅ Reference drawing loaded successfully")
+    print(f"💡 You should draw: {category.upper()}")
 except Exception as e:
     print(f"❌ Error loading QuickDraw reference: {e}")
+    raise
+
+# Step 3: Capture photo from camera (with category displayed)
+captured_image = capture_photo_from_camera(category)
+
+if captured_image is None:
+    print("\n❌ No image captured. Exiting...")
+    exit()
+
+# Step 4: Preprocess captured image
+try:
+    print("\n📊 Processing captured image...")
+    user_img, original_img = preprocess_captured_image(captured_image)
+    print("✅ Image processed successfully")
+except Exception as e:
+    print(f"❌ Error processing image: {e}")
     raise
 
 # Step 5: Get contour statistics
