@@ -80,41 +80,56 @@ def preprocess_canvas(canvas):
     return normalized
 
 def detect_blue_object(frame):
-    """Detect blue colored object - inspired by QuickDraw_V1."""
+    """Detect blue colored object - multiple detection methods."""
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     
-    # Blue detection parameters from QuickDraw_V1
-    # For blue: a=120, b=100, c=15
-    a = 120
-    b = 100
-    c = 15
+    # Method 1: QuickDraw_V1 style (narrower range)
+    a1, b1, c1 = 120, 100, 15
+    Lower1 = np.array([a1-c1, 50+b1, 50])
+    Upper1 = np.array([a1+c1, 255, 255])
+    mask1 = cv2.inRange(hsv, Lower1, Upper1)
     
-    Lower_color = np.array([a-c, 50+b, 50])
-    Upper_color = np.array([a+c, 255, 255])
+    # Method 2: Wider blue range
+    Lower2 = np.array([100, 50, 50])
+    Upper2 = np.array([130, 255, 255])
+    mask2 = cv2.inRange(hsv, Lower2, Upper2)
     
-    # Create mask
-    mask = cv2.inRange(hsv, Lower_color, Upper_color)
+    # Method 3: Light blue range
+    Lower3 = np.array([90, 50, 50])
+    Upper3 = np.array([110, 255, 255])
+    mask3 = cv2.inRange(hsv, Lower3, Upper3)
     
-    # Morphological operations for better tracking (from QuickDraw_V1)
+    # Combine all masks
+    mask = cv2.bitwise_or(mask1, mask2)
+    mask = cv2.bitwise_or(mask, mask3)
+    
+    # Morphological operations
     kernel = np.ones((5, 5), np.uint8)
-    mask = cv2.erode(mask, kernel, iterations=2)
+    mask = cv2.erode(mask, kernel, iterations=1)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-    mask = cv2.dilate(mask, kernel, iterations=1)
+    mask = cv2.dilate(mask, kernel, iterations=2)
     
     # Find contours
     cnts, heir = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[-2:]
     center = None
+    circle_info = None
     
-    if len(cnts) >= 1:
-        cnt = max(cnts, key=cv2.contourArea)
-        if cv2.contourArea(cnt) > 200:  # Minimum area from QuickDraw_V1
-            M = cv2.moments(cnt)
-            if M['m00'] != 0:
-                center = (int(M['m10'] / M['m00']), int(M['m01'] / M['m00']))
-                ((x, y), radius) = cv2.minEnclosingCircle(cnt)
-                return center, mask, cnt, (int(x), int(y), int(radius))
+    if len(cnts) > 0:
+        # Sort by area and try largest ones
+        cnts_sorted = sorted(cnts, key=cv2.contourArea, reverse=True)
+        
+        for cnt in cnts_sorted:
+            area = cv2.contourArea(cnt)
+            # Lower threshold - accept smaller objects
+            if area > 100:  # Reduced from 200
+                M = cv2.moments(cnt)
+                if M['m00'] != 0:
+                    center = (int(M['m10'] / M['m00']), int(M['m01'] / M['m00']))
+                    ((x, y), radius) = cv2.minEnclosingCircle(cnt)
+                    circle_info = (int(x), int(y), int(radius))
+                    break  # Use first valid detection
     
-    return None, mask, None, None
+    return center, mask, None, circle_info
 
 def calculate_focal_point(drawing_points, canvas_size):
     """Calculate focal point for large drawings."""
@@ -273,7 +288,7 @@ def create_unified_frame(frame, canvas, mask, reference_img, category, center, c
     unified = np.ones((display_h, display_w, 3), dtype=np.uint8) * 240
     
     # Resize components
-    cam_w, cam_h = 640, 480  # Larger camera view
+    cam_w, cam_h = 640, 480
     canvas_w, canvas_h = 400, 300
     ref_w, ref_h = 200, 200
     mask_w, mask_h = 200, 150
@@ -281,23 +296,30 @@ def create_unified_frame(frame, canvas, mask, reference_img, category, center, c
     # Main camera feed with drawing overlay
     frame_with_drawing = frame.copy()
     
-    # Draw the trail on camera feed (like QuickDraw_V1)
+    # Draw the trail on camera feed
     if len(pts) > 1:
         for i in range(1, len(pts)):
             if pts[i - 1] is None or pts[i] is None:
                 continue
             if current_mode == DRAW_MODE:
-                cv2.line(frame_with_drawing, pts[i - 1], pts[i], DRAWING_COLOR, 3)
+                cv2.line(frame_with_drawing, pts[i - 1], pts[i], DRAWING_COLOR, 4)
             else:
-                cv2.line(frame_with_drawing, pts[i - 1], pts[i], (255, 255, 255), 5)
+                cv2.line(frame_with_drawing, pts[i - 1], pts[i], (255, 255, 255), 6)
     
-    # Draw circle around detected object
-    if center is not None and circle_info is not None:
-        x, y, radius = circle_info
-        cv2.circle(frame_with_drawing, (x, y), radius, (0, 255, 255), 2)
-        cv2.circle(frame_with_drawing, center, 5, (0, 0, 255), -1)
-        cv2.putText(frame_with_drawing, "BLUE DETECTED", (x - 50, y - radius - 20),
+    # Draw circle and center point
+    if center is not None:
+        if circle_info is not None:
+            x, y, radius = circle_info
+            cv2.circle(frame_with_drawing, (x, y), radius, (0, 255, 255), 2)
+        cv2.circle(frame_with_drawing, center, 8, (0, 0, 255), -1)
+        cv2.putText(frame_with_drawing, "BLUE DETECTED", (center[0] - 60, center[1] - 30),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+    else:
+        # Show message when not detected
+        cv2.putText(frame_with_drawing, "NO BLUE DETECTED", (w//2 - 100, h//2),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+        cv2.putText(frame_with_drawing, "Show blue object to camera", (w//2 - 120, h//2 + 30),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
     
     # Resize frame with drawing
     frame_resized = cv2.resize(frame_with_drawing, (cam_w, cam_h))
@@ -314,13 +336,13 @@ def create_unified_frame(frame, canvas, mask, reference_img, category, center, c
         mask_colored = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
         mask_resized = cv2.resize(mask_colored, (mask_w, mask_h))
     
-    # Layout: Top row - Camera (with drawing), Canvas, Reference
+    # Layout
     y_offset_top = 50
     
-    # Camera feed with drawing overlay (main view)
+    # Camera feed with drawing overlay
     unified[y_offset_top:y_offset_top+cam_h, 10:10+cam_w] = frame_resized
     
-    # Draw focal point on camera if exists
+    # Focal point
     if focal_point[0] is not None:
         fx, fy = focal_point[0]
         scale_x = cam_w / w
@@ -328,14 +350,12 @@ def create_unified_frame(frame, canvas, mask, reference_img, category, center, c
         fx_scaled = int(fx * scale_x)
         fy_scaled = int(fy * scale_y)
         cv2.circle(unified, (10 + fx_scaled, y_offset_top + fy_scaled), 20, (255, 0, 255), 3)
-        cv2.putText(unified, "FOCUS", (10 + fx_scaled - 30, y_offset_top + fy_scaled - 25),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 2)
     
-    # Canvas (separate drawing board)
+    # Canvas
     canvas_x = 10 + cam_w + 10
     unified[y_offset_top:y_offset_top+canvas_h, canvas_x:canvas_x+canvas_w] = canvas_resized
     
-    # Reference image
+    # Reference
     ref_x = canvas_x + canvas_w + 10
     unified[y_offset_top:y_offset_top+ref_h, ref_x:ref_x+ref_w] = ref_colored
     
@@ -345,6 +365,8 @@ def create_unified_frame(frame, canvas, mask, reference_img, category, center, c
     # Mask
     if show_mask:
         unified[y_offset_bottom:y_offset_bottom+mask_h, 10:10+mask_w] = mask_resized
+        cv2.putText(unified, "MASK (white=detected)", (10, y_offset_bottom - 5),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 0), 1)
     
     # Info panel
     info_x = 10 + mask_w + 10 if show_mask else 10
@@ -352,11 +374,9 @@ def create_unified_frame(frame, canvas, mask, reference_img, category, center, c
     info_w = 400
     info_h = 150
     
-    # Draw info panel background
     cv2.rectangle(unified, (info_x, info_y), (info_x + info_w, info_y + info_h), (200, 200, 200), -1)
     cv2.rectangle(unified, (info_x, info_y), (info_x + info_w, info_y + info_h), (0, 0, 0), 2)
     
-    # Info text
     line_height = 20
     y_pos = info_y + 25
     
@@ -382,18 +402,16 @@ def create_unified_frame(frame, canvas, mask, reference_img, category, center, c
     else:
         cv2.putText(unified, f"Tracking: INACTIVE", (info_x + 10, y_pos),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-    
-    if focal_point[0]:
         y_pos += line_height
-        cv2.putText(unified, f"Focal Point: ACTIVE", (info_x + 10, y_pos),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
+        cv2.putText(unified, f"Show blue object!", (info_x + 10, y_pos),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
     
     # Instructions
     inst_x = 10
     inst_y = display_h - 80
     cv2.putText(unified, "Controls: 's'=Submit | 'c'=Clear | 'e'=Erase | 'd'=Draw | 'n'=New Word | 'q'=Quit",
                (inst_x, inst_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
-    cv2.putText(unified, "Draw on camera feed - Your drawing appears in real-time!",
+    cv2.putText(unified, "Check MASK window - white areas = detected blue. Draw on camera feed!",
                (inst_x, inst_y + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
     
     # Title
@@ -443,6 +461,7 @@ def main():
     
     print("\nInstructions:")
     print("  • Show a BLUE colored object to the camera")
+    print("  • Check the MASK window (bottom left) - white = detected blue")
     print("  • Move the blue object to draw - you'll see your drawing on camera feed!")
     print("  • Press 'e' to toggle eraser mode")
     print("  • Press 'd' to toggle draw mode")
@@ -459,13 +478,14 @@ def main():
     
     time.sleep(2)
     
-    # Use deque for point tracking (like QuickDraw_V1)
+    # Use deque for point tracking
     pts = deque(maxlen=512)
     blackboard = np.zeros((480, 640, 3), dtype=np.uint8)
     
     drawing_active = False
     
-    print("Starting detection... Draw on the camera feed!")
+    print("Starting detection...")
+    print("TIP: Check the MASK window - if you see white areas when showing blue object, detection is working!")
     
     while True:
         ret, frame = cap.read()
@@ -477,31 +497,31 @@ def main():
         # Detect blue object
         center, mask, contour, circle_info = detect_blue_object(frame)
         
-        # Track points using deque (like QuickDraw_V1)
+        # Track points
         if center is not None:
             pts.appendleft(center)
             drawing_active = True
-            
-            # Draw on blackboard (for processing)
-            if len(pts) > 1:
-                for i in range(1, len(pts)):
-                    if pts[i - 1] is None or pts[i] is None:
-                        continue
-                    if current_mode == DRAW_MODE:
-                        cv2.line(blackboard, pts[i - 1], pts[i], (255, 255, 255), 7)
-                    else:
-                        cv2.line(blackboard, pts[i - 1], pts[i], (0, 0, 0), 10)
         else:
-            # When object is lost, keep last few points for smooth transition
+            # Keep drawing even if briefly lost
             if len(pts) > 0:
-                # Don't clear immediately - allow brief gaps
+                # Allow small gaps
                 pass
+        
+        # Draw on blackboard
+        if len(pts) > 1:
+            for i in range(1, len(pts)):
+                if pts[i - 1] is None or pts[i] is None:
+                    continue
+                if current_mode == DRAW_MODE:
+                    cv2.line(blackboard, pts[i - 1], pts[i], (255, 255, 255), 7)
+                else:
+                    cv2.line(blackboard, pts[i - 1], pts[i], (0, 0, 0), 10)
         
         # Calculate focal point
         drawing_points = [p for p in pts if p is not None]
         focal_point, focal_size = calculate_focal_point(drawing_points, frame.shape[:2])
         
-        # Create unified frame with drawing overlaid
+        # Create unified frame
         unified_frame = create_unified_frame(frame, blackboard, mask, reference_img, category,
                                            center, circle_info, pts, (focal_point, focal_size))
         
@@ -513,7 +533,7 @@ def main():
             if drawing_active and len(pts) > 10:
                 break
             else:
-                print("⚠️  Please draw something first! Make sure blue object is detected.")
+                print("⚠️  Please draw something first! Check MASK window to verify blue detection.")
         elif key == ord('c'):
             blackboard = np.zeros((480, 640, 3), dtype=np.uint8)
             pts = deque(maxlen=512)
