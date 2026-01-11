@@ -79,33 +79,38 @@ def preprocess_canvas(canvas):
     return normalized
 
 def detect_dark_blue_object(frame):
-    """Detect dark blue colored object in the frame - strict detection."""
+    """Detect blue colored object in the frame - more lenient detection."""
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     
-    # Very specific range for blue shades only
-    # Blue hue: 100-120, higher saturation to avoid gray/white, controlled brightness
-    lower_blue = np.array([100, 120, 60])    # Darker, more saturated blue
-    upper_blue = np.array([120, 255, 180])   # Upper limit for blue shades
+    # Wider range for blue detection - covers more shades of blue
+    # Blue hue in HSV: 100-130 (OpenCV uses 0-180)
+    # Using wider ranges to catch different lighting conditions
+    lower_blue1 = np.array([100, 50, 50])    # Lower bound for blue
+    upper_blue1 = np.array([130, 255, 255])  # Upper bound for blue
     
-    # Create mask for blue color
-    mask = cv2.inRange(hsv, lower_blue, upper_blue)
+    # Also check for cyan-blue range
+    lower_blue2 = np.array([90, 50, 50])
+    upper_blue2 = np.array([100, 255, 255])
     
-    # Apply stronger morphological operations to remove noise
-    kernel = np.ones((7, 7), np.uint8)
+    # Create masks for both blue ranges
+    mask1 = cv2.inRange(hsv, lower_blue1, upper_blue1)
+    mask2 = cv2.inRange(hsv, lower_blue2, upper_blue2)
+    
+    # Combine masks
+    mask = cv2.bitwise_or(mask1, mask2)
+    
+    # Apply morphological operations to remove noise
+    kernel = np.ones((5, 5), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-    
-    # Additional erosion to remove small noise
-    kernel_erode = np.ones((3, 3), np.uint8)
-    mask = cv2.erode(mask, kernel_erode, iterations=1)
     
     # Find contours
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
     if len(contours) > 0:
-        # Filter contours by area - only accept reasonably sized objects
-        min_area = 800   # Increased minimum area to avoid small noise
-        max_area = 30000 # Maximum area to avoid detecting entire background
+        # Lower minimum area to catch smaller objects
+        min_area = 300   # Reduced from 800
+        max_area = 50000  # Increased from 30000
         
         valid_contours = [c for c in contours if min_area <= cv2.contourArea(c) <= max_area]
         
@@ -121,12 +126,7 @@ def detect_dark_blue_object(frame):
                 # Ensure coordinates are within frame bounds
                 h, w = frame.shape[:2]
                 if 0 <= cx < w and 0 <= cy < h:
-                    # Validate center point is actually blue
-                    center_hsv = hsv[cy, cx]
-                    if (lower_blue[0] <= center_hsv[0] <= upper_blue[0] and
-                        lower_blue[1] <= center_hsv[1] <= upper_blue[1] and
-                        lower_blue[2] <= center_hsv[2] <= upper_blue[2]):
-                        return (cx, cy), mask, largest_contour
+                    return (cx, cy), mask, largest_contour
     
     return None, mask, None
 
@@ -297,6 +297,19 @@ def create_unified_frame(frame, canvas, mask, reference_img, category, center, f
     # Resize frame
     frame_resized = cv2.resize(frame, (cam_w, cam_h))
     
+    # Draw detection feedback on frame
+    if center is not None:
+        # Scale center to resized frame
+        scale_x = cam_w / w
+        scale_y = cam_h / h
+        cx_scaled = int(center[0] * scale_x)
+        cy_scaled = int(center[1] * scale_y)
+        # Draw circle at detected position
+        cv2.circle(frame_resized, (cx_scaled, cy_scaled), 15, (0, 255, 0), -1)
+        cv2.circle(frame_resized, (cx_scaled, cy_scaled), 20, (0, 255, 0), 2)
+        cv2.putText(frame_resized, "BLUE DETECTED", (cx_scaled - 50, cy_scaled - 30),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+    
     # Resize canvas
     canvas_resized = cv2.resize(canvas, (canvas_w, canvas_h))
     
@@ -382,12 +395,19 @@ def create_unified_frame(frame, canvas, mask, reference_img, category, center, f
     if center:
         cv2.putText(unified, f"Tracking: ACTIVE", (info_x + 10, y_pos),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        # Show point count
+        y_pos += line_height
+        cv2.putText(unified, f"Points: {len(drawing_points)}", (info_x + 10, y_pos),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
     else:
         cv2.putText(unified, f"Tracking: INACTIVE", (info_x + 10, y_pos),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-    y_pos += line_height
+        y_pos += line_height
+        cv2.putText(unified, f"Show blue object", (info_x + 10, y_pos),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
     
     if focal_point[0]:
+        y_pos += line_height
         cv2.putText(unified, f"Focal Point: ACTIVE", (info_x + 10, y_pos),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
     
@@ -396,7 +416,7 @@ def create_unified_frame(frame, canvas, mask, reference_img, category, center, f
     inst_y = display_h - 80
     cv2.putText(unified, "Controls: 's'=Submit | 'c'=Clear | 'e'=Erase | 'd'=Draw | 'n'=New Word | 'q'=Quit",
                (inst_x, inst_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
-    cv2.putText(unified, "Use dark blue object to draw in the air",
+    cv2.putText(unified, "Use blue object to draw - check mask window to see detection",
                (inst_x, inst_y + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
     
     # Title
@@ -445,8 +465,9 @@ def main():
         return
     
     print("\nInstructions:")
-    print("  • Show a DARK BLUE colored object to the camera")
-    print("  • Move the dark blue object to draw in the air (drawing will be in BLUE)")
+    print("  • Show a BLUE colored object to the camera")
+    print("  • Move the blue object to draw in the air (drawing will be in BLUE)")
+    print("  • Check the mask window - white areas show detected blue")
     print("  • Press 'e' to toggle eraser mode")
     print("  • Press 'd' to toggle draw mode")
     print("  • Press 's' to submit your drawing")
@@ -467,6 +488,8 @@ def main():
     drawing_active = False
     drawing_points = []
     
+    print("Starting detection... Look for 'BLUE DETECTED' message on camera feed")
+    
     while True:
         ret, frame = cap.read()
         if not ret:
@@ -474,7 +497,7 @@ def main():
         
         frame = cv2.flip(frame, 1)
         
-        # Detect dark blue object
+        # Detect blue object
         center, mask, contour = detect_dark_blue_object(frame)
         
         # Calculate focal point for large drawings
@@ -504,11 +527,14 @@ def main():
         if key == ord('s'):
             if drawing_active:
                 break
+            else:
+                print("⚠️  Please draw something first! Make sure blue object is detected.")
         elif key == ord('c'):
             canvas[:] = 255
             drawing_active = False
             prev_center = None
             drawing_points = []
+            print("Canvas cleared!")
         elif key == ord('e'):
             current_mode = ERASE_MODE
             print("Eraser mode activated")
