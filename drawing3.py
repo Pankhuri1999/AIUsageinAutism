@@ -489,6 +489,8 @@ def main():
         
         # Calculate focal point for large drawings
         focal_point, focal_size = calculate_focal_point(drawing_points, canvas.shape[:2])
+        unified_frame = create_unified_frame(frame, canvas, mask, reference_img, category,
+                                   center, (focal_point, focal_size), drawing_points)
         
         # Draw on canvas
         if center is not None:
