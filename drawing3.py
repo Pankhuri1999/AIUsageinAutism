@@ -14,19 +14,8 @@ SIMPLE_WORDS = [
     "book", "clock", "key", "umbrella", "rainbow", "butterfly"
 ]
 
-# Drawing colors
-COLORS = {
-    'black': (0, 0, 0),
-    'red': (0, 0, 255),
-    'green': (0, 255, 0),
-    'blue': (255, 0, 0),
-    'yellow': (0, 255, 255),
-    'purple': (255, 0, 255),
-    'orange': (0, 165, 255)
-}
-COLOR_NAMES = list(COLORS.keys())
-current_color = 'black'
-current_color_index = 0
+# Drawing color - fixed to blue
+DRAWING_COLOR = (255, 0, 0)  # Blue in BGR
 
 # Drawing modes
 DRAW_MODE = 0
@@ -90,38 +79,61 @@ def preprocess_canvas(canvas):
     return normalized
 
 def detect_dark_blue_object(frame):
-    """Detect dark blue colored object in the frame."""
+    """Detect dark blue colored object in the frame - strict detection."""
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     
-    # Define range for dark blue color in HSV
-    # Blue hue is around 100-130 in OpenCV HSV (0-180 range)
-    # Dark blue has lower saturation and value
-    lower_dark_blue = np.array([100, 50, 30])   # Lower bound for dark blue
-    upper_dark_blue = np.array([130, 255, 150])  # Upper bound for dark blue shades
+    # Very specific range for blue shades only
+    # Blue hue: 100-120, higher saturation to avoid gray/white, controlled brightness
+    lower_blue = np.array([100, 120, 60])    # Darker, more saturated blue
+    upper_blue = np.array([120, 255, 180])   # Upper limit for blue shades
     
-    # Create mask for dark blue color
-    mask = cv2.inRange(hsv, lower_dark_blue, upper_dark_blue)
+    # Create mask for blue color
+    mask = cv2.inRange(hsv, lower_blue, upper_blue)
     
-    # Apply morphological operations to remove noise
-    kernel = np.ones((5, 5), np.uint8)
+    # Apply stronger morphological operations to remove noise
+    kernel = np.ones((7, 7), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
     
+    # Additional erosion to remove small noise
+    kernel_erode = np.ones((3, 3), np.uint8)
+    mask = cv2.erode(mask, kernel_erode, iterations=1)
+    
+    # Find contours
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
     if len(contours) > 0:
-        largest_contour = max(contours, key=cv2.contourArea)
-        M = cv2.moments(largest_contour)
-        if M["m00"] != 0:
-            cx = int(M["m10"] / M["m00"])
-            cy = int(M["m01"] / M["m00"])
-            return (cx, cy), mask, largest_contour
+        # Filter contours by area - only accept reasonably sized objects
+        min_area = 800   # Increased minimum area to avoid small noise
+        max_area = 30000 # Maximum area to avoid detecting entire background
+        
+        valid_contours = [c for c in contours if min_area <= cv2.contourArea(c) <= max_area]
+        
+        if len(valid_contours) > 0:
+            # Get the largest valid contour
+            largest_contour = max(valid_contours, key=cv2.contourArea)
+            
+            M = cv2.moments(largest_contour)
+            if M["m00"] != 0:
+                cx = int(M["m10"] / M["m00"])
+                cy = int(M["m01"] / M["m00"])
+                
+                # Ensure coordinates are within frame bounds
+                h, w = frame.shape[:2]
+                if 0 <= cx < w and 0 <= cy < h:
+                    # Validate center point is actually blue
+                    center_hsv = hsv[cy, cx]
+                    if (lower_blue[0] <= center_hsv[0] <= upper_blue[0] and
+                        lower_blue[1] <= center_hsv[1] <= upper_blue[1] and
+                        lower_blue[2] <= center_hsv[2] <= upper_blue[2]):
+                        return (cx, cy), mask, largest_contour
+    
     return None, mask, None
 
 def calculate_focal_point(drawing_points, canvas_size):
     """Calculate focal point for large drawings."""
     if len(drawing_points) < 10:
-        return None, None  # Fixed: Always return tuple
+        return None, None
     
     points_array = np.array(drawing_points)
     x_min, y_min = points_array.min(axis=0)
@@ -358,8 +370,8 @@ def create_unified_frame(frame, canvas, mask, reference_img, category, center, f
                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
     y_pos += line_height
     
-    cv2.putText(unified, f"Color: {current_color.upper()}", (info_x + 10, y_pos),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.6, COLORS[current_color], 2)
+    cv2.putText(unified, f"Color: BLUE", (info_x + 10, y_pos),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.6, DRAWING_COLOR, 2)
     y_pos += line_height
     
     mode_text = "ERASE" if current_mode == ERASE_MODE else "DRAW"
@@ -379,27 +391,12 @@ def create_unified_frame(frame, canvas, mask, reference_img, category, center, f
         cv2.putText(unified, f"Focal Point: ACTIVE", (info_x + 10, y_pos),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
     
-    # Color palette (QuickDraw_V1 inspired)
-    palette_x = info_x + info_w + 10
-    palette_y = y_offset_bottom
-    palette_size = 30
-    spacing = 5
-    
-    for i, (name, color) in enumerate(COLORS.items()):
-        px = palette_x
-        py = palette_y + i * (palette_size + spacing)
-        cv2.rectangle(unified, (px, py), (px + palette_size, py + palette_size), color, -1)
-        if i == current_color_index:
-            cv2.rectangle(unified, (px - 2, py - 2), (px + palette_size + 2, py + palette_size + 2), (0, 0, 0), 3)
-        cv2.putText(unified, name[:3], (px + palette_size + 5, py + 20),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 0), 1)
-    
     # Instructions
     inst_x = 10
     inst_y = display_h - 80
     cv2.putText(unified, "Controls: 's'=Submit | 'c'=Clear | 'e'=Erase | 'd'=Draw | 'n'=New Word | 'q'=Quit",
                (inst_x, inst_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
-    cv2.putText(unified, "Color Change: Move dark blue object to color palette area and hold",
+    cv2.putText(unified, "Use dark blue object to draw in the air",
                (inst_x, inst_y + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
     
     # Title
@@ -410,7 +407,7 @@ def create_unified_frame(frame, canvas, mask, reference_img, category, center, f
 
 def main():
     """Main function to compare air drawing with QuickDraw shapes."""
-    global current_color, current_color_index, current_mode
+    global current_mode
     
     print("=" * 60)
     print("🎨 Air Drawing Comparison with QuickDraw Dataset")
@@ -449,7 +446,7 @@ def main():
     
     print("\nInstructions:")
     print("  • Show a DARK BLUE colored object to the camera")
-    print("  • Move the dark blue object to draw in the air")
+    print("  • Move the dark blue object to draw in the air (drawing will be in BLUE)")
     print("  • Press 'e' to toggle eraser mode")
     print("  • Press 'd' to toggle draw mode")
     print("  • Press 's' to submit your drawing")
@@ -469,7 +466,6 @@ def main():
     prev_center = None
     drawing_active = False
     drawing_points = []
-    last_color_change_time = 0
     
     while True:
         ret, frame = cap.read()
@@ -481,27 +477,14 @@ def main():
         # Detect dark blue object
         center, mask, contour = detect_dark_blue_object(frame)
         
-        # Color selection (QuickDraw_V1 feature)
-        # If dark blue object is in palette area (right side), change color
-        if center:
-            cx, cy = center
-            h, w = frame.shape[:2]
-            # Check if in right 20% of screen (palette area)
-            if cx > w * 0.8:
-                current_time = time.time()
-                if current_time - last_color_change_time > 1.0:  # Change color every 1 second
-                    current_color_index = (current_color_index + 1) % len(COLOR_NAMES)
-                    current_color = COLOR_NAMES[current_color_index]
-                    last_color_change_time = current_time
-        
-        # Calculate focal point for large drawings - FIXED: Always returns tuple
+        # Calculate focal point for large drawings
         focal_point, focal_size = calculate_focal_point(drawing_points, canvas.shape[:2])
         
-        # Draw on canvas
+        # Draw on canvas - always use blue color
         if center is not None:
             if prev_center:
                 if current_mode == DRAW_MODE:
-                    cv2.line(canvas, prev_center, center, COLORS[current_color], 5)
+                    cv2.line(canvas, prev_center, center, DRAWING_COLOR, 5)
                 else:  # ERASE_MODE
                     cv2.line(canvas, prev_center, center, (255, 255, 255), 10)
                 drawing_active = True
