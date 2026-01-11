@@ -89,13 +89,20 @@ def preprocess_canvas(canvas):
     normalized = normalize_drawing(thresh)
     return normalized
 
-def detect_yellow_object(frame):
-    """Detect yellow colored object in the frame."""
+def detect_dark_blue_object(frame):
+    """Detect dark blue colored object in the frame."""
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    lower_yellow = np.array([20, 100, 100])
-    upper_yellow = np.array([30, 255, 255])
-    mask = cv2.inRange(hsv, lower_yellow, upper_yellow)
     
+    # Define range for dark blue color in HSV
+    # Blue hue is around 100-130 in OpenCV HSV (0-180 range)
+    # Dark blue has lower saturation and value
+    lower_dark_blue = np.array([100, 50, 30])   # Lower bound for dark blue
+    upper_dark_blue = np.array([130, 255, 150])  # Upper bound for dark blue shades
+    
+    # Create mask for dark blue color
+    mask = cv2.inRange(hsv, lower_dark_blue, upper_dark_blue)
+    
+    # Apply morphological operations to remove noise
     kernel = np.ones((5, 5), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
@@ -114,7 +121,7 @@ def detect_yellow_object(frame):
 def calculate_focal_point(drawing_points, canvas_size):
     """Calculate focal point for large drawings."""
     if len(drawing_points) < 10:
-        return None
+        return None, None  # Fixed: Always return tuple
     
     points_array = np.array(drawing_points)
     x_min, y_min = points_array.min(axis=0)
@@ -392,7 +399,7 @@ def create_unified_frame(frame, canvas, mask, reference_img, category, center, f
     inst_y = display_h - 80
     cv2.putText(unified, "Controls: 's'=Submit | 'c'=Clear | 'e'=Erase | 'd'=Draw | 'n'=New Word | 'q'=Quit",
                (inst_x, inst_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
-    cv2.putText(unified, "Color Change: Move yellow object to color palette area and hold",
+    cv2.putText(unified, "Color Change: Move dark blue object to color palette area and hold",
                (inst_x, inst_y + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
     
     # Title
@@ -441,8 +448,8 @@ def main():
         return
     
     print("\nInstructions:")
-    print("  • Show a YELLOW colored object to the camera")
-    print("  • Move the yellow object to draw in the air")
+    print("  • Show a DARK BLUE colored object to the camera")
+    print("  • Move the dark blue object to draw in the air")
     print("  • Press 'e' to toggle eraser mode")
     print("  • Press 'd' to toggle draw mode")
     print("  • Press 's' to submit your drawing")
@@ -471,11 +478,11 @@ def main():
         
         frame = cv2.flip(frame, 1)
         
-        # Detect yellow object
-        center, mask, contour = detect_yellow_object(frame)
+        # Detect dark blue object
+        center, mask, contour = detect_dark_blue_object(frame)
         
         # Color selection (QuickDraw_V1 feature)
-        # If yellow object is in palette area (right side), change color
+        # If dark blue object is in palette area (right side), change color
         if center:
             cx, cy = center
             h, w = frame.shape[:2]
@@ -487,10 +494,8 @@ def main():
                     current_color = COLOR_NAMES[current_color_index]
                     last_color_change_time = current_time
         
-        # Calculate focal point for large drawings
+        # Calculate focal point for large drawings - FIXED: Always returns tuple
         focal_point, focal_size = calculate_focal_point(drawing_points, canvas.shape[:2])
-        unified_frame = create_unified_frame(frame, canvas, mask, reference_img, category,
-                                   center, (focal_point, focal_size), drawing_points)
         
         # Draw on canvas
         if center is not None:
