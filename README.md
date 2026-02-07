@@ -15,36 +15,25 @@ Each module captures child responses, computes similarity metrics, and records b
 ---
 
 ## 📁 Repository Structure
-
 AIUsageinAutism/
-
 │
 ├── motion_therapy/
-
-│ └── Jupyter notebooks + sample logs
-
+│   └── Jupyter notebooks + sample logs
 │
 ├── speech_therapy/
-
-│ └── Jupyter notebooks + sample logs
-
+│   └── Jupyter notebooks + sample logs
 │
 ├── context_interpretation/
-
-│ └── Jupyter notebooks + CSV response files
-
+│   └── Jupyter notebooks + CSV response files
 │
 ├── emotion_recognition/
-
-│ └── Jupyter notebooks + CSV response files
-
+│   └── Jupyter notebooks + CSV response files
 │
 ├── datasets/
-
-│ └── Sample CSV files for interpretation and emotion tasks
-
+│   └── Sample CSV files for interpretation and emotion tasks
 │
 └── README.md
+
 
 
 Each folder contains an independent Jupyter Notebook implementing the respective experiment.
