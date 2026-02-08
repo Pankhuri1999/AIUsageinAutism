@@ -180,17 +180,6 @@ python EmotionRecognitionActivity/emotionTherapy.py
 
 ---
 
-## 📦 Code Availability (Research Paper Section)
-
-**Code availability:**  
-All code (Python scripts + Jupyter notebooks) and experiment artifacts (including CSV logs for Context Interpretation and Emotion Recognition) are publicly available at:  
-https://github.com/Pankhuri1999/AIUsageinAutism
-
-**Data availability and privacy note:**  
-Raw motion/speech videos are not publicly released because they contain personal, identifiable motion recordings, hand gestures, facial expressions, and speech data.  
-However, CSV logs for the Context Interpretation and Emotion Recognition modules are included in their respective folders.
-
----
 
 ## 🎯 Intended Use
 
