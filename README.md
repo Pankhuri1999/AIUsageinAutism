@@ -40,10 +40,10 @@ This folder contains **notebooks for running and validating motion-therapy video
   - `MotionTherapyNotebook.ipynb`  
   - Purpose: run **two videos (reference vs test)** and compute similarity metrics for *actual comparison*.
 - **Additional notebooks for experimental validation and analysis** (proof notebooks)  
-  - e.g., `motionTherapyNotebook1.ipynb`, `motionTherapyNotebook2.ipynb` (names may vary)  
+  - e.g., `motionTherapyNotebook1.ipynb`, `motionTherapyNotebook2.ipynb`  
   - Purpose: visualization + analysis used to **validate the experimental claims** (e.g., trends, stability checks).
-- (Optional/If present) **Python script** for running comparisons outside notebooks.  
-- **Screenshots (if provided)** of outputs/plots.
+-  **Python script** for running comparisons outside notebooks.  
+- **Screenshots ** of outputs/plots can be found inside the notebook.
 
 **Important (video path update):**  
 If you are running the **Python file** (when present), update the paths here:
@@ -66,8 +66,8 @@ This folder contains **notebooks for running and validating speech-therapy compa
   - Purpose: run **two videos (reference vs test)** and compute similarity metrics for *actual comparison*.
 - **Other notebooks for experimental validation and analysis**  
   - Purpose: analysis notebooks used as **proof/validation** of the experiments.
-- (Optional/If present) **Python script** for running comparisons outside notebooks.
-- **Screenshots (if provided)** of outputs/plots.
+-  **Python script** for running comparisons outside notebooks.
+- **Screenshots ** of outputs/plots can be found inside the notebook.
 
 **Important (video path update):**  
 If you are running the **Python file** (when present), update the paths here:
