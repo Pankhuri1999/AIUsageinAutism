@@ -1,116 +1,209 @@
 # AI-Supported Autism Therapy Monitoring  
-### Methods for Non-Verbal and Speech Interpretation and Scoring
+## Methods for Non-Verbal and Speech Interpretation and Scoring
 
-This repository presents an AI-assisted framework designed to support autism therapy monitoring through structured non-verbal and speech-based interpretation tasks. The system provides automated scoring, response logging, and performance tracking to assist therapists and parents in observing continuous behavioral progress.
+Repository:  
+https://github.com/Pankhuri1999/AIUsageinAutism
 
-The project focuses on four interactive therapy modules:
+This repository provides a research prototype for **AI-assisted autism therapy monitoring** using four modules:
 
-- Motion Therapy  
-- Speech Therapy  
-- Context Interpretation  
-- Emotion Recognition  
+- **Motion Therapy** (video-to-video motion similarity)  
+- **Speech Therapy** (video-to-video mouth/speech movement similarity)  
+- **Context Interpretation** (interactive UI + response scoring/logging)  
+- **Emotion Recognition** (interactive UI + response scoring/logging)
 
-Each module captures child responses, computes similarity metrics, and records behavioral indicators such as latency, consistency, and score stability.
+Each module contains runnable code (Python scripts and/or Jupyter notebooks), experiment artifacts (CSV logs), and supporting analysis notebooks used to validate the experiments.
 
 ---
 
 ## 📁 Repository Structure
+
+```text
 AIUsageinAutism/
 │
-├── motion_therapy/
-│   └── Jupyter notebooks + sample logs
-│
-├── speech_therapy/
-│   └── Jupyter notebooks + sample logs
-│
-├── context_interpretation/
-│   └── Jupyter notebooks + CSV response files
-│
-├── emotion_recognition/
-│   └── Jupyter notebooks + CSV response files
-│
-├── datasets/
-│   └── Sample CSV files for interpretation and emotion tasks
-│
+├── MotionTherapy/
+├── SpeechTherapy/
+├── ContextInterpretation/
+├── EmotionRecognitionActivity/
 └── README.md
-
-
-
-Each folder contains an independent Jupyter Notebook implementing the respective experiment.
+```
 
 ---
 
-## 🧪 Experiments Overview
+## 📂 What’s Inside Each Folder (Detailed)
 
-### 1. Motion Therapy
-Evaluates controlled arm and facial movements using temporal similarity metrics (FastDTW). Logs angular deviations and response stability.
+### 1) `MotionTherapy/`
 
-### 2. Speech Therapy
-Compares spoken responses against reference phrases and measures articulation similarity and reaction time.
+This folder contains **notebooks for running and validating motion-therapy video comparisons**.
 
-### 3. Context Interpretation
-Assesses semantic understanding of visual scenarios. Child responses are logged and compared using NLP-based similarity scoring.
+**Includes:**
+- **Python notebook(s) for direct comparison of two videos**  
+  - `MotionTherapyNotebook.ipynb`  
+  - Purpose: run **two videos (reference vs test)** and compute similarity metrics for *actual comparison*.
+- **Additional notebooks for experimental validation and analysis** (proof notebooks)  
+  - e.g., `motionTherapyNotebook1.ipynb`, `motionTherapyNotebook2.ipynb` (names may vary)  
+  - Purpose: visualization + analysis used to **validate the experimental claims** (e.g., trends, stability checks).
+- (Optional/If present) **Python script** for running comparisons outside notebooks.  
+- **Screenshots (if provided)** of outputs/plots.
 
-### 4. Emotion Recognition
-Measures emotion identification accuracy from visual prompts and records consistency across trials.
+**Important (video path update):**  
+If you are running the **Python file** (when present), update the paths here:
 
-All experiments generate structured CSV logs capturing:
+```python
+if __name__ == "__main__":
+    VIDEO1_PATH = "degree1.mp4"
+    VIDEO2_PATH = "degree2.mp4"
+```
 
-- Timestamp  
-- Trial number  
-- Prompt ID  
-- Child response  
-- Similarity score  
-- Processing latency  
-- Running averages  
+---
+
+### 2) `SpeechTherapy/`
+
+This folder contains **notebooks for running and validating speech-therapy comparisons** (typically mouth movement / articulation comparison using videos).
+
+**Includes:**
+- **Notebook for direct comparison of two videos**
+  - `speechTherapyNotebook.ipynb`  
+  - Purpose: run **two videos (reference vs test)** and compute similarity metrics for *actual comparison*.
+- **Other notebooks for experimental validation and analysis**  
+  - Purpose: analysis notebooks used as **proof/validation** of the experiments.
+- (Optional/If present) **Python script** for running comparisons outside notebooks.
+- **Screenshots (if provided)** of outputs/plots.
+
+**Important (video path update):**  
+If you are running the **Python file** (when present), update the paths here:
+
+```python
+if __name__ == "__main__":
+    video1 = "/content/vidS1.mp4"   # correct/reference
+    video2 = "/content/vidS2.mp4"   # incorrect/test
+
+    compare_two_videos(
+        ...
+    )
+```
+
+---
+
+### 3) `ContextInterpretation/`
+
+This folder contains an **interactive UI** for context interpretation tasks and the **experiment logs** collected during sessions.
+
+**Includes:**
+- **Runnable Python file** to launch the UI  
+  - Run it to start the Context Interpretation interface.
+- **Jupyter notebook** version for development/analysis  
+  - Useful for debugging, analysis, or running in notebook environments.
+- **UI screenshot(s)**  
+  - A screenshot image of the UI is stored in this folder.
+- **CSV response logs**  
+  - CSV files store values captured during experiments (responses + scores).
+
+**How to run:**
+```bash
+python contextInterpretation.py
+```
+
+**CSV logs typically include (example fields):**
+- timestamp / trial number  
+- prompt/image id  
+- child response  
+- similarity score  
+- response time / latency  
+- running averages (if logged)
+
+---
+
+### 4) `EmotionRecognitionActivity/`
+
+This folder contains an **interactive UI** for emotion recognition therapy activity and the **experiment logs** collected during sessions.
+
+**Includes:**
+- **Runnable Python file** to launch the UI  
+- **Jupyter notebook** version for development/analysis  
+- **UI screenshot(s)** in the folder  
+- **CSV response logs** (e.g., `responses_log_cartoon.csv`)  
+  - Stores experiment responses and measured values.
+
+**How to run:**
+```bash
+python emotionTherapy.py
+```
 
 ---
 
 ## 💻 Computing Infrastructure
 
-All experiments were conducted using Jupyter Notebook environments on CPU-based systems, including Google Colab and local machines. The operating systems used were Windows and Linux, with Python version ≥ 3.8. GPU acceleration was not required.
+All experiments were conducted using **Jupyter Notebook environments** on **CPU-based systems**, including **Google Colab** and local machines.
 
-Typical system specifications included:
-
-- RAM: 8–12 GB  
-- CPU: Standard laptop/desktop processors  
-- Environment: Jupyter Notebook  
-
-All models and analysis pipelines were implemented using standard Python libraries including:
-
-- OpenCV  
-- NumPy  
-- Pandas  
-- scikit-learn  
-- FastDTW  
-- SentenceTransformers / TF-IDF  
+- Operating Systems: **Windows** and **Linux**
+- Python version: **≥ 3.8**
+- GPU: **Not required**
+- Typical memory: **8–12 GB RAM**
+- Standard Python libraries used for training/evaluation/analysis, including (as applicable):
+  - NumPy, Pandas, OpenCV, scikit-learn
+  - FastDTW
+  - SentenceTransformers / TF-IDF (for NLP similarity)
 
 ---
 
-## 🔐 Data Availability
+## 🔁 Reproducibility (How to Re-Run)
 
-The motion and speech therapy datasets cannot be publicly released as they contain the authors’ own facial expressions, hand gestures, and voice recordings.
+### 1) Clone the repository
+```bash
+git clone https://github.com/Pankhuri1999/AIUsageinAutism.git
+cd AIUsageinAutism
+```
 
-CSV logs for the Context Interpretation and Emotion Recognition experiments are included in their respective folders.
+### 2) Install dependencies (baseline)
+```bash
+pip install numpy pandas opencv-python scikit-learn fastdtw sentence-transformers
+```
+
+### 3) Reproduce Motion Therapy comparisons
+- Open `MotionTherapy/MotionTherapyNotebook.ipynb` and run all cells (chang the directory/ path of videos), **OR**
+- If a Python script is present, update `VIDEO1_PATH` and `VIDEO2_PATH` then run the script.
+
+### 4) Reproduce Speech Therapy comparisons
+- Open `SpeechTherapy/speechTherapyNotebook.ipynb` and run all cells (chang the directory/ path of videos), **OR**
+- If a Python script is present, update `video1` and `video2` paths then run the script.
+
+### 5) Reproduce Context + Emotion UI experiments
+- Run the Python file in each folder to launch the UI:
+```bash
+python ContextInterpretation/contextInterpretation.py
+python EmotionRecognitionActivity/emotionTherapy.py
+```
+- The corresponding CSV logs in the folder store the recorded experiment responses.
+
+### 6) Reproduce analysis/validation plots
+- Run the additional notebooks inside MotionTherapy/ and SpeechTherapy/ that contain validation/analysis used to support the experiments.
+
+---
+
+## 📦 Code Availability (Research Paper Section)
+
+**Code availability:**  
+All code (Python scripts + Jupyter notebooks) and experiment artifacts (including CSV logs for Context Interpretation and Emotion Recognition) are publicly available at:  
+https://github.com/Pankhuri1999/AIUsageinAutism
+
+**Data availability and privacy note:**  
+Raw motion/speech videos are not publicly released because they contain personal, identifiable motion recordings, hand gestures, facial expressions, and speech data.  
+However, CSV logs for the Context Interpretation and Emotion Recognition modules are included in their respective folders.
 
 ---
 
 ## 🎯 Intended Use
 
 This framework is designed as a research prototype to:
+- support therapists with objective scoring and progress monitoring,
+- enable parents to track progress at home,
+- support non-verbal children where language is a barrier.
 
-- Assist therapists with objective behavioral scoring  
-- Enable parents to track progress at home  
-- Support non-verbal children through automated interpretation tasks  
-- Provide quantitative metrics for therapy monitoring  
-
-It is not intended as a diagnostic tool.
+**Not intended for clinical diagnosis.**
 
 ---
 
-## 🚀 Getting Started
+## 👩‍💻 Author
 
-1. Clone the repository:
-
-```bash
-git clone https://github.com/Pankhuri1999/AIUsageinAutism.git
+Pankhuri  
+GitHub: https://github.com/Pankhuri1999
