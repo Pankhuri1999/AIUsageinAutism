@@ -46,7 +46,7 @@ This folder contains **notebooks for running and validating motion-therapy video
 - **Screenshots ** of outputs/plots can be found inside the notebook.
 
 **Important (video path update):**  
-If you are running the **Python file** (when present), update the paths here:
+If you are running the **Python file** (MotionTherapyPythonFile.py), update the paths here:
 
 ```python
 if __name__ == "__main__":
@@ -70,7 +70,7 @@ This folder contains **notebooks for running and validating speech-therapy compa
 - **Screenshots ** of outputs/plots can be found inside the notebook.
 
 **Important (video path update):**  
-If you are running the **Python file** (when present), update the paths here:
+If you are running the **Python file** (speechTherapyPythonFile.py), update the paths here:
 
 ```python
 if __name__ == "__main__":
