@@ -192,7 +192,3 @@ This framework is designed as a research prototype to:
 
 ---
 
-## 👩‍💻 Author
-
-Pankhuri  
-GitHub: https://github.com/Pankhuri1999
