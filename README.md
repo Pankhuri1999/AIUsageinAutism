@@ -31,7 +31,7 @@ AIUsageinAutism/
 
 ## 📂 What’s Inside Each Folder (Detailed)
 
-### 1) `MotionTherapy/`
+### 1) `MotionTherapy`
 
 This folder contains **notebooks for running and validating motion-therapy video comparisons**.
 
@@ -56,7 +56,7 @@ if __name__ == "__main__":
 
 ---
 
-### 2) `SpeechTherapy/`
+### 2) `SpeechTherapy`
 
 This folder contains **notebooks for running and validating speech-therapy comparisons** (typically mouth movement / articulation comparison using videos).
 
@@ -84,7 +84,7 @@ if __name__ == "__main__":
 
 ---
 
-### 3) `ContextInterpretation/`
+### 3) `ContextInterpretation`
 
 This folder contains an **interactive UI** for context interpretation tasks and the **experiment logs** collected during sessions.
 
@@ -113,7 +113,7 @@ python contextInterpretation.py
 
 ---
 
-### 4) `EmotionRecognitionActivity/`
+### 4) `EmotionRecognitionActivity`
 
 This folder contains an **interactive UI** for emotion recognition therapy activity and the **experiment logs** collected during sessions.
 
